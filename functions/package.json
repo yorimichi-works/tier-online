@@ -1,0 +1,23 @@
+{
+  "name": "tieronline-functions",
+  "private": true,
+  "main": "lib/index.js",
+  "engines": {
+    "node": "22"
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "npm run build && node --test lib/aggregation.test.js",
+    "migrate:localization": "node scripts/migrate-localization.js"
+  },
+  "dependencies": {
+    "firebase-admin": "^14.3.0",
+    "firebase-functions": "^7.3.2"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.2"
+  },
+  "overrides": {
+    "uuid": "^11.1.1"
+  }
+}

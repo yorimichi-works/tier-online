@@ -1,0 +1,74 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function ownsTopic(topicId) {
+      return signedIn() &&
+        get(/databases/$(database)/documents/topics/$(topicId)).data.creatorId == request.auth.uid;
+    }
+
+    match /users/{userId} {
+      allow read: if signedIn() && request.auth.uid == userId;
+      allow create, update: if signedIn() && request.auth.uid == userId &&
+        request.resource.data.uid == request.auth.uid;
+      allow delete: if signedIn() && request.auth.uid == userId;
+    }
+
+    match /tierRegionStats/{statsId} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    match /topics/{topicId} {
+      allow read: if true;
+      allow create: if signedIn() &&
+        request.resource.data.creatorId == request.auth.uid &&
+        request.resource.data.get('likeCount', 0) == 0;
+      allow update: if signedIn() && resource.data.creatorId == request.auth.uid &&
+        request.resource.data.creatorId == resource.data.creatorId &&
+        request.resource.data.participants == resource.data.participants &&
+        request.resource.data.community == resource.data.community &&
+        request.resource.data.distributions == resource.data.distributions &&
+        request.resource.data.disagreement == resource.data.disagreement &&
+        request.resource.data.get('likeCount', 0) ==
+          resource.data.get('likeCount', 0);
+      allow delete: if signedIn() && resource.data.creatorId == request.auth.uid;
+
+      match /items/{itemId} {
+        allow read: if true;
+        allow write: if ownsTopic(topicId) ||
+          (signedIn() &&
+           getAfter(/databases/$(database)/documents/topics/$(topicId)).data.creatorId == request.auth.uid);
+      }
+
+      match /submissions/{userId} {
+        allow read: if true;
+        allow write: if signedIn() && request.auth.uid == userId;
+      }
+
+      match /talks/{talkId} {
+        allow read: if true;
+        allow create, update: if signedIn();
+        allow delete: if ownsTopic(topicId);
+      }
+
+      match /reports/{reportId} {
+        allow create: if signedIn() &&
+          request.resource.data.reporterUserId == request.auth.uid;
+        allow read, update, delete: if false;
+      }
+
+      match /likes/{userId} {
+        allow read: if signedIn() && request.auth.uid == userId;
+        allow create: if signedIn() && request.auth.uid == userId &&
+          request.resource.data.userId == request.auth.uid;
+        allow delete: if signedIn() && request.auth.uid == userId;
+        allow update: if false;
+      }
+    }
+  }
+}
