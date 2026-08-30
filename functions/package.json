@@ -7,12 +7,15 @@
   },
   "scripts": {
     "build": "tsc",
-    "test": "npm run build && node --test lib/aggregation.test.js lib/moderation.test.js lib/imageSearch.test.js lib/accountDeletion.test.js lib/tierCreationPolicy.test.js lib/internationalization.test.js lib/translation/translationBatch.test.js",
+    "test": "npm run build && node --test lib/aggregation.test.js lib/moderation.test.js lib/imageSearch.test.js lib/accountDeletion.test.js lib/tierCreationPolicy.test.js lib/internationalization.test.js lib/translation/translationBatch.test.js lib/translation/phase1d.test.js",
     "migrate:localization": "node scripts/migrate-localization.js",
     "translation:fetch": "npm run build && node lib/translation/cli.js fetch",
+    "translation:merge": "npm run build && node lib/translation/cli.js merge",
     "translation:validate": "npm run build && node lib/translation/cli.js validate",
     "translation:import": "npm run build && node lib/translation/cli.js import",
-    "translation:reset-stale": "npm run build && node lib/translation/cli.js reset-stale"
+    "translation:reset-stale": "npm run build && node lib/translation/cli.js reset-stale",
+    "translation:review-export": "npm run build && node lib/translation/cli.js review-export",
+    "translation:cache-invalidate": "npm run build && node lib/translation/cli.js cache-invalidate"
   },
   "dependencies": {
     "firebase-admin": "^14.3.0",

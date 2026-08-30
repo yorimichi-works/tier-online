@@ -30,6 +30,7 @@ class _MyTierScreenState extends State<MyTierScreen> {
   _MyTierSection _section = _MyTierSection.created;
   TopicCardDensity _density = TopicCardDensity.full;
   final Set<String> _deletingTopicIds = {};
+  final Set<String> _togglingVisibilityTopicIds = {};
 
   Future<void> _deleteTopic(BuildContext context, TierTopic topic) async {
     final confirmed = await showDialog<bool>(
@@ -85,9 +86,15 @@ class _MyTierScreenState extends State<MyTierScreen> {
         ],
       ),
     );
-    if (confirmed == true) {
-      await widget.appState.setTopicPublic(topic, false);
-    }
+    if (confirmed != true || !mounted) return;
+    await _setTopicPublic(topic, false);
+  }
+
+  Future<void> _setTopicPublic(TierTopic topic, bool isPublic) async {
+    setState(() => _togglingVisibilityTopicIds.add(topic.id));
+    await widget.appState.setTopicPublic(topic, isPublic);
+    if (!mounted) return;
+    setState(() => _togglingVisibilityTopicIds.remove(topic.id));
   }
 
   @override
@@ -221,17 +228,36 @@ class _MyTierScreenState extends State<MyTierScreen> {
                                           ),
                                         ),
                                         OutlinedButton.icon(
-                                          onPressed: () => topic.isPublic
-                                              ? _makePrivate(context, topic)
-                                              : appState.setTopicPublic(
-                                                  topic,
-                                                  true,
+                                          onPressed:
+                                              _togglingVisibilityTopicIds
+                                                  .contains(topic.id)
+                                              ? null
+                                              : () => topic.isPublic
+                                                    ? _makePrivate(
+                                                        context,
+                                                        topic,
+                                                      )
+                                                    : _setTopicPublic(
+                                                        topic,
+                                                        true,
+                                                      ),
+                                          icon:
+                                              _togglingVisibilityTopicIds
+                                                  .contains(topic.id)
+                                              ? const SizedBox(
+                                                  width: 16,
+                                                  height: 16,
+                                                  child: CircularProgressIndicator(
+                                                    strokeWidth: 2,
+                                                  ),
+                                                )
+                                              : Icon(
+                                                  topic.isPublic
+                                                      ? Icons
+                                                            .visibility_off_outlined
+                                                      : Icons
+                                                            .visibility_outlined,
                                                 ),
-                                          icon: Icon(
-                                            topic.isPublic
-                                                ? Icons.visibility_off_outlined
-                                                : Icons.visibility_outlined,
-                                          ),
                                           label: Text(
                                             context.l10n.t(
                                               topic.isPublic
@@ -250,9 +276,19 @@ class _MyTierScreenState extends State<MyTierScreen> {
                                                   context,
                                                   topic,
                                                 ),
-                                          icon: const Icon(
-                                            Icons.delete_outline_rounded,
-                                          ),
+                                          icon: _deletingTopicIds.contains(
+                                            topic.id,
+                                          )
+                                              ? const SizedBox(
+                                                  width: 16,
+                                                  height: 16,
+                                                  child: CircularProgressIndicator(
+                                                    strokeWidth: 2,
+                                                  ),
+                                                )
+                                              : const Icon(
+                                                  Icons.delete_outline_rounded,
+                                                ),
                                           label: Text(
                                             context.l10n.t('deleteTier'),
                                           ),

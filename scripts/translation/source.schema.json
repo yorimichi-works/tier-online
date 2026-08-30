@@ -14,13 +14,25 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["documentId", "contentVersion", "sourceLanguage", "targetLanguages", "context", "content"],
+        "required": ["documentId", "contentVersion", "sourceLanguage", "targetLanguages", "codexTargetLanguages", "context", "content", "translationContext"],
         "properties": {
           "documentId": {"type": "string", "minLength": 1},
           "contentVersion": {"type": "integer", "minimum": 1},
           "sourceLanguage": {"enum": ["ja", "en", "ko", "zh-TW", "pt-BR"]},
           "targetLanguages": {"type": "array", "items": {"enum": ["ja", "en", "ko", "zh-TW", "pt-BR"]}, "uniqueItems": true},
+          "codexTargetLanguages": {"type": "array", "items": {"enum": ["ja", "en", "ko", "zh-TW", "pt-BR"]}, "uniqueItems": true},
           "context": {"type": "object"},
+          "translationContext": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["dictionaryVersion", "commonTerms", "officialNames", "doNotTranslate"],
+            "properties": {
+              "dictionaryVersion": {"type": "string"},
+              "commonTerms": {"type": "object"},
+              "officialNames": {"type": "object"},
+              "doNotTranslate": {"type": "array", "items": {"type": "string"}}
+            }
+          },
           "content": {
             "type": "object",
             "additionalProperties": false,

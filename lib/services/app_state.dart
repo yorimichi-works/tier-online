@@ -561,7 +561,8 @@ class AppState extends ChangeNotifier {
       return _cloudRepository != null &&
           creatorId == _cloudRepository!.currentUserId;
     }
-    return topic.id.startsWith('local-') ||
+    return topic.id.startsWith('t-') ||
+        topic.id.startsWith('local-') || // 旧ID形式との互換用
         topic.creatorName == currentUserName ||
         // 旧仕様(自分視点の「あなた」等)で保存された既存データとの互換用。
         const {
@@ -698,7 +699,9 @@ class AppState extends ChangeNotifier {
         participants: aggregate.submissionCount,
       );
       _repository.add(updated);
-      if (topicId.startsWith('local-')) await _localStore.saveTopic(updated);
+      if (topicId.startsWith('t-') || topicId.startsWith('local-')) {
+        await _localStore.saveTopic(updated);
+      }
       notifyListeners();
     }
   }

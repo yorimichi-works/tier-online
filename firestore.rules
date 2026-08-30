@@ -24,6 +24,20 @@ service cloud.firestore {
         (signedIn() && topic.creatorId == request.auth.uid);
     }
 
+    function translationFieldsUnchanged() {
+      return request.resource.data.diff(resource.data).affectedKeys().hasNone([
+        'translations',
+        'translationStatus',
+        'contentVersion',
+        'sourceContentHash',
+        'translationBatchId',
+        'processingStartedAt',
+        'lastTranslationBatchId',
+        'translationUpdatedAt',
+        'hasTranslationReviewRequired'
+      ]);
+    }
+
     match /admins/{uid} {
       allow read: if signedIn() && request.auth.uid == uid;
       allow write: if false;
@@ -78,7 +92,8 @@ service cloud.firestore {
         request.resource.data.distributions == resource.data.distributions &&
         request.resource.data.disagreement == resource.data.disagreement &&
         request.resource.data.get('likeCount', 0) ==
-          resource.data.get('likeCount', 0);
+          resource.data.get('likeCount', 0) &&
+        translationFieldsUnchanged();
       allow delete: if signedIn() && resource.data.creatorId == request.auth.uid;
 
       match /items/{itemId} {

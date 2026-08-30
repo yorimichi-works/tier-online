@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import '../l10n/app_localizations.dart';
 import '../models/tier_models.dart';
 import '../services/app_state.dart';
+import '../services/firebase_bootstrap.dart';
 import '../services/rewarded_ad_service.dart';
 import '../widgets/common_widgets.dart';
 import '../widgets/tier_widgets.dart';
@@ -36,6 +37,26 @@ class _TierPublishPreviewScreenState extends State<TierPublishPreviewScreen> {
   TierItem _item(String id) =>
       widget.topic.items.firstWhere((item) => item.id == id);
 
+  /// クラウド接続が確立していない場合(起動時のFirebase初期化がタイムアウト
+  /// した等)、この場で再接続を試みる。これに失敗した状態で公開を進めると、
+  /// 画像がアップロードされないまま「local-」始まりのローカル限定Tierとして
+  /// 静かに保存されてしまう(=公開に見えて実際は公開されていない)ため、
+  /// 公開操作は必ずクラウド接続を要求する。
+  Future<bool> _ensureCloudConnected() async {
+    if (widget.appState.cloudEnabled) return true;
+    final firebase = await FirebaseBootstrap.initialize().timeout(
+      const Duration(seconds: 12),
+      onTimeout: () => const FirebaseBootstrapResult(),
+    );
+    if (firebase.repository != null && firebase.auth != null) {
+      await widget.appState.attachCloud(
+        cloudRepository: firebase.repository!,
+        auth: firebase.auth!,
+      );
+    }
+    return widget.appState.cloudEnabled;
+  }
+
   Future<bool> _ensureRegisteredAccount() async {
     if (!widget.appState.authEnabled) return true;
     if (widget.appState.isAnonymous) {
@@ -57,9 +78,22 @@ class _TierPublishPreviewScreenState extends State<TierPublishPreviewScreen> {
 
   Future<void> _publish() async {
     if (_publishing) return;
-    if (!await _ensureRegisteredAccount()) return;
-    if (!mounted) return;
     setState(() => _publishing = true);
+    if (!await _ensureCloudConnected()) {
+      if (!mounted) return;
+      setState(() => _publishing = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(context.l10n.t('publishRequiresConnection'))),
+      );
+      return;
+    }
+    if (!mounted) return;
+    if (!await _ensureRegisteredAccount()) {
+      if (!mounted) return;
+      setState(() => _publishing = false);
+      return;
+    }
+    if (!mounted) return;
     try {
       await widget.appState.addTopic(widget.topic, widget.placements);
       if (!mounted) return;

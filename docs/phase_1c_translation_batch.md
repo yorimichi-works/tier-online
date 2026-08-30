@@ -56,5 +56,7 @@ the repository.
 
 No LLM API, Scheduler, realtime/comment translation, SEO generation, hreflang,
 sitemap work, analytics, advertising, preset generation, or translation cache is
-part of Phase 1-C. A future worker may replace only the manual Codex step while
+part of Phase 1-C. Phase 1-D adds the initial dictionary/cache/retranslation
+layer described in [phase_1d_translation_quality.md](phase_1d_translation_quality.md).
+A future worker may replace only the manual Codex step while
 retaining the same schemas, validation, and guarded import path.

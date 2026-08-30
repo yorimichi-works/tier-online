@@ -597,8 +597,7 @@ class _CreateScreenState extends State<CreateScreen> {
       return;
     }
     final editingTopic = widget.initialTopic;
-    final id =
-        editingTopic?.id ?? 'local-${DateTime.now().millisecondsSinceEpoch}';
+    final id = editingTopic?.id ?? 't-${DateTime.now().millisecondsSinceEpoch}';
     final items = [
       for (var i = 0; i < _items.length; i++)
         TierItem(

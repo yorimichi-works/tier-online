@@ -114,6 +114,19 @@ class _TierResultScreenState extends State<TierResultScreen> {
     );
   }
 
+  void _goToTop() {
+    Navigator.of(
+      context,
+    ).pushNamedAndRemoveUntil('/${appState.locale.code}/', (route) => false);
+  }
+
+  void _createAnother() {
+    Navigator.of(context).pushNamedAndRemoveUntil(
+      '/${appState.locale.code}/create',
+      (route) => false,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final placements = appState.placementsFor(topic.id);
@@ -158,6 +171,35 @@ class _TierResultScreenState extends State<TierResultScreen> {
               ),
               const SizedBox(height: 5),
               const SizedBox(height: 14),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: _goToTop,
+                      icon: const Icon(Icons.home_outlined, size: 19),
+                      label: Text(context.l10n.t('backToTop')),
+                      style: OutlinedButton.styleFrom(
+                        minimumSize: const Size.fromHeight(46),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: FilledButton.icon(
+                      onPressed: _createAnother,
+                      icon: const Icon(
+                        Icons.add_circle_outline_rounded,
+                        size: 19,
+                      ),
+                      label: Text(context.l10n.t('createAnotherTier')),
+                      style: FilledButton.styleFrom(
+                        minimumSize: const Size.fromHeight(46),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 18),
               RepaintBoundary(
                 key: _shareBoundaryKey,
                 child: ColoredBox(
@@ -206,41 +248,21 @@ class _TierResultScreenState extends State<TierResultScreen> {
                   ),
                 ),
               ),
-              const SizedBox(height: 18),
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(18),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              context.l10n.t('matchRate'),
-                              style: TextStyle(
-                                color: Theme.of(
-                                  context,
-                                ).colorScheme.onSurfaceVariant,
-                                fontSize: 11,
-                              ),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              '$agreement%',
-                              style: Theme.of(context).textTheme.headlineMedium
-                                  ?.copyWith(fontWeight: FontWeight.w900),
-                            ),
-                          ],
-                        ),
-                      ),
-                      if (different != null)
+              // 参加者が自分だけの場合、「みんなとの一致率」は自分自身と比較
+              // しているだけで意味を持たない(常に100%になる)ため非表示にする。
+              if (topic.participants > 1) ...[
+                const SizedBox(height: 18),
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(18),
+                    child: Row(
+                      children: [
                         Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                context.l10n.t('mostDifferent'),
+                                context.l10n.t('matchRate'),
                                 style: TextStyle(
                                   color: Theme.of(
                                     context,
@@ -248,41 +270,67 @@ class _TierResultScreenState extends State<TierResultScreen> {
                                   fontSize: 11,
                                 ),
                               ),
-                              const SizedBox(height: 6),
+                              const SizedBox(height: 4),
                               Text(
-                                different.accessibleLabel,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.w900,
-                                ),
-                              ),
-                              const SizedBox(height: 5),
-                              Row(
-                                children: [
-                                  TierBadge(
-                                    rank: mine[different.id]!,
-                                    size: 26,
-                                  ),
-                                  const Padding(
-                                    padding: EdgeInsets.symmetric(
-                                      horizontal: 5,
-                                    ),
-                                    child: Text('↔'),
-                                  ),
-                                  TierBadge(
-                                    rank: topic.community[different.id]!,
-                                    size: 26,
-                                  ),
-                                ],
+                                '$agreement%',
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .headlineMedium
+                                    ?.copyWith(fontWeight: FontWeight.w900),
                               ),
                             ],
                           ),
                         ),
-                    ],
+                        if (different != null)
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  context.l10n.t('mostDifferent'),
+                                  style: TextStyle(
+                                    color: Theme.of(
+                                      context,
+                                    ).colorScheme.onSurfaceVariant,
+                                    fontSize: 11,
+                                  ),
+                                ),
+                                const SizedBox(height: 6),
+                                Text(
+                                  different.accessibleLabel,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w900,
+                                  ),
+                                ),
+                                const SizedBox(height: 5),
+                                Row(
+                                  children: [
+                                    TierBadge(
+                                      rank: mine[different.id]!,
+                                      size: 26,
+                                    ),
+                                    const Padding(
+                                      padding: EdgeInsets.symmetric(
+                                        horizontal: 5,
+                                      ),
+                                      child: Text('↔'),
+                                    ),
+                                    TierBadge(
+                                      rank: topic.community[different.id]!,
+                                      size: 26,
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+                      ],
+                    ),
                   ),
                 ),
-              ),
+              ],
               const SizedBox(height: 13),
               Align(
                 alignment: Alignment.centerLeft,

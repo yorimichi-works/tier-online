@@ -53,6 +53,7 @@ export type TranslatedLocale = {
   itemNames?: Record<string, string>;
   reviewRequired: boolean;
   translationErrorCode?: string;
+  cacheHit?: boolean;
 };
 
 export type TranslatedBatch = {
@@ -72,12 +73,15 @@ export type StoredTranslation = Omit<TranslatedLocale, "status"> & {
   promptVersion: string;
   translationProvider: string;
   translationMode: "auto" | "manual";
+  qualityStatus?: "auto" | "reviewed" | "approved" | "rejected";
+  dictionaryVersion?: string;
+  manualTranslationOutdated?: boolean;
   translatedAt?: unknown;
   batchId?: string;
 };
 
 export const DEFAULT_TRANSLATION_VERSION = 1;
-export const DEFAULT_PROMPT_VERSION = "tier-translation-v1";
+export const DEFAULT_PROMPT_VERSION = "tier-translation-v2";
 export const DEFAULT_TRANSLATION_PROVIDER = "codex";
 
 const asRecord = (value: unknown): Record<string, unknown> | null =>
@@ -187,7 +191,10 @@ export const pendingTranslationsAfterSourceChange = (
   const existing = translationsOf(data);
   return Object.fromEntries(Object.entries(existing).map(([language, value]) => [
     language,
-    value?.translationMode === "manual" ? value : {
+    value?.translationMode === "manual" ? {
+      ...value,
+      manualTranslationOutdated: true,
+    } : {
       ...value,
       status: "pending",
     },
@@ -301,6 +308,7 @@ export const validateTranslatedBatch = (
       allowedKeys(translation, [
         "status", "title", "description", "category", "tags", "itemNames",
         "reviewRequired", "translationErrorCode",
+        "cacheHit",
       ], translationPath, errors);
       if (!["completed", "failed", "review_required"].includes(String(translation.status))) {
         errors.push(`${translationPath}.status: unsupported status`);
@@ -308,6 +316,9 @@ export const validateTranslatedBatch = (
       }
       if (typeof translation.reviewRequired !== "boolean") {
         errors.push(`${translationPath}.reviewRequired: boolean required`);
+      }
+      if (translation.cacheHit !== undefined && typeof translation.cacheHit !== "boolean") {
+        errors.push(`${translationPath}.cacheHit: boolean required`);
       }
       if ((translation.status === "review_required") !== (translation.reviewRequired === true)) {
         errors.push(`${translationPath}.reviewRequired: inconsistent with status`);

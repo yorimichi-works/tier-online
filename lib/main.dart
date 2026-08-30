@@ -45,9 +45,36 @@ Future<void> _initializeServices(AppState appState) async {
         cloudRepository: firebase.repository!,
         auth: firebase.auth!,
       );
+    } else {
+      // 初回のFirebase接続が(電波状況などで)間に合わなかった場合、そのままだと
+      // 以後もクラウド未接続のまま(公開・いいね等が静かにローカルへ縮退した
+      // まま)になってしまう。バックグラウンドで数回だけ再試行する。
+      unawaited(_retryCloudAttach(appState));
     }
   } finally {
     appState.completeCloudBootstrap();
+  }
+}
+
+Future<void> _retryCloudAttach(AppState appState) async {
+  for (final delay in const [
+    Duration(seconds: 5),
+    Duration(seconds: 15),
+    Duration(seconds: 30),
+  ]) {
+    await Future<void>.delayed(delay);
+    if (appState.cloudEnabled) return;
+    final firebase = await FirebaseBootstrap.initialize().timeout(
+      const Duration(seconds: 12),
+      onTimeout: () => const FirebaseBootstrapResult(),
+    );
+    if (firebase.repository != null && firebase.auth != null) {
+      await appState.attachCloud(
+        cloudRepository: firebase.repository!,
+        auth: firebase.auth!,
+      );
+      return;
+    }
   }
 }
 

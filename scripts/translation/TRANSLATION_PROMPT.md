@@ -13,8 +13,18 @@ or a completion message.
 - `zh-TW`: Traditional Chinese for Taiwan
 - `pt-BR`: Brazilian Portuguese
 
-Translate each item only into its `targetLanguages`. Never return the source
-language or any other locale.
+Translate each item only into its `codexTargetLanguages`. `targetLanguages`
+also includes locales already resolved by the exact cache; do not return or
+overwrite those cached locales. Never return the source language or any other
+locale.
+
+Each item includes a small `translationContext` selected for that specific UGC:
+
+- Prefer every spelling in `commonTerms` when the corresponding concept occurs.
+- Treat `officialNames` as authoritative localized proper names.
+- Preserve strings in `doNotTranslate` exactly.
+- Record no dictionary metadata in the output; the deterministic importer does
+  that after validation.
 
 ## Translation rules
 
@@ -38,6 +48,7 @@ language or any other locale.
   `reviewRequired: false`, and a short stable `translationErrorCode`.
 - For a successful translation, use `status: "completed"` and
   `reviewRequired: false`.
+- Never set `cacheHit`; that field is reserved for deterministic cache results.
 - Copy `batchId`, `documentId`, and `contentVersion` exactly into their matching
   output fields. Do not create IDs.
 - Never output or rewrite source fields, user identity data, or system metadata.

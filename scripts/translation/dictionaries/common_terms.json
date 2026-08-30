@@ -1,0 +1,55 @@
+{
+  "version": "tier-dict-v1",
+  "terms": {
+    "tier_list": {
+      "match": ["Tier", "Tier表", "ティア表", "티어표", "階級表"],
+      "translations": {
+        "ja": "Tier表",
+        "en": "Tier List",
+        "ko": "티어표",
+        "zh-TW": "Tier List",
+        "pt-BR": "Tier List"
+      }
+    },
+    "community_tier": {
+      "match": ["みんなのTier", "みんなで決めるTier", "Community Tier", "커뮤니티 티어", "社群 Tier", "Tier da comunidade"],
+      "translations": {
+        "ja": "みんなのTier",
+        "en": "Community Tier",
+        "ko": "커뮤니티 티어",
+        "zh-TW": "社群 Tier",
+        "pt-BR": "Tier da comunidade"
+      }
+    },
+    "join": {
+      "match": ["参加", "Join", "참여", "參加", "Participar"],
+      "translations": {
+        "ja": "参加する",
+        "en": "Join",
+        "ko": "참여하기",
+        "zh-TW": "參加",
+        "pt-BR": "Participar"
+      }
+    },
+    "ranking": {
+      "match": ["ランキング", "Ranking", "랭킹", "排行榜"],
+      "translations": {
+        "ja": "ランキング",
+        "en": "Ranking",
+        "ko": "랭킹",
+        "zh-TW": "排行榜",
+        "pt-BR": "Ranking"
+      }
+    },
+    "template": {
+      "match": ["テンプレート", "Template", "템플릿", "範本", "Modelo"],
+      "translations": {
+        "ja": "テンプレート",
+        "en": "Template",
+        "ko": "템플릿",
+        "zh-TW": "範本",
+        "pt-BR": "Modelo"
+      }
+    }
+  }
+}

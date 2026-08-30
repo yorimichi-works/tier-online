@@ -1,0 +1,50 @@
+{
+  "version": "official-names-v1",
+  "names": {
+    "genshin-impact": {
+      "type": "work",
+      "match": ["原神", "Genshin Impact", "원신"],
+      "translations": {
+        "ja": "原神",
+        "en": "Genshin Impact",
+        "ko": "원신",
+        "zh-TW": "原神",
+        "pt-BR": "Genshin Impact"
+      }
+    },
+    "pokemon": {
+      "type": "work",
+      "match": ["ポケモン", "Pokémon", "Pokemon", "포켓몬", "寶可夢"],
+      "translations": {
+        "ja": "ポケモン",
+        "en": "Pokémon",
+        "ko": "포켓몬",
+        "zh-TW": "寶可夢",
+        "pt-BR": "Pokémon"
+      }
+    },
+    "one-piece": {
+      "type": "work",
+      "match": ["ONE PIECE", "One Piece", "ワンピース", "원피스", "航海王"],
+      "translations": {
+        "ja": "ONE PIECE",
+        "en": "One Piece",
+        "ko": "원피스",
+        "zh-TW": "航海王",
+        "pt-BR": "One Piece"
+      }
+    },
+    "naruto": {
+      "type": "work",
+      "match": ["NARUTO", "Naruto", "ナルト", "나루토", "火影忍者"],
+      "translations": {
+        "ja": "NARUTO -ナルト-",
+        "en": "Naruto",
+        "ko": "나루토",
+        "zh-TW": "火影忍者",
+        "pt-BR": "Naruto"
+      }
+    }
+  },
+  "doNotTranslate": ["Minecraft", "VALORANT", "YouTube", "TikTok"]
+}

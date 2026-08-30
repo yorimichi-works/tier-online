@@ -7,6 +7,7 @@ import {
 } from "firebase-admin/firestore";
 import {randomUUID} from "node:crypto";
 
+import {DEFAULT_DICTIONARY_VERSION} from "./phase1d";
 import {
   DEFAULT_PROMPT_VERSION,
   DEFAULT_TRANSLATION_PROVIDER,
@@ -38,6 +39,14 @@ export type ImportReport = {
   missing: string[];
   skippedManual: Array<{documentId: string; language: string}>;
   statusCounts: Record<string, number>;
+  translationStats: {
+    total: number;
+    cacheHits: number;
+    codexTranslations: number;
+    manualSkipped: number;
+    failed: number;
+    reviewRequired: number;
+  };
 };
 
 export const createBatchId = (now = new Date()): string => {
@@ -146,15 +155,21 @@ const cleanTranslatedLocale = (
   language: string,
   sourceContentVersion: number,
   batchId: string,
+  dictionaryVersion: string,
 ): Record<string, unknown> => {
+  const cacheHit = value.cacheHit === true;
   const result: Record<string, unknown> = {
     status: value.status,
     reviewRequired: value.reviewRequired,
     sourceContentVersion,
     translationVersion: DEFAULT_TRANSLATION_VERSION,
     promptVersion: DEFAULT_PROMPT_VERSION,
-    translationProvider: DEFAULT_TRANSLATION_PROVIDER,
+    translationProvider: cacheHit ? "exact-cache" : DEFAULT_TRANSLATION_PROVIDER,
     translationMode: "auto",
+    qualityStatus: "auto",
+    dictionaryVersion,
+    manualTranslationOutdated: false,
+    cacheHit,
     batchId,
     translatedAt: FieldValue.serverTimestamp(),
   };
@@ -189,6 +204,14 @@ export const importTranslatedBatch = async (
     missing: [],
     skippedManual: [],
     statusCounts: {},
+    translationStats: {
+      total: 0,
+      cacheHits: 0,
+      codexTranslations: 0,
+      manualSkipped: 0,
+      failed: 0,
+      reviewRequired: 0,
+    },
   };
   const sourceById = new Map(source.items.map((item) => [item.documentId, item]));
 
@@ -239,15 +262,25 @@ export const importTranslatedBatch = async (
         const current = existing[language];
         if (current?.translationMode === "manual") {
           report.skippedManual.push({documentId: translatedItem.documentId, language});
+          report.translationStats.manualSkipped += 1;
           continue;
         }
         const incoming = translatedItem.translations[language];
         if (incoming) {
+          report.translationStats.total += 1;
+          if (incoming.cacheHit) report.translationStats.cacheHits += 1;
+          else report.translationStats.codexTranslations += 1;
+          if (incoming.status === "failed") report.translationStats.failed += 1;
+          if (incoming.reviewRequired) report.translationStats.reviewRequired += 1;
+          const dictionaryVersion = (sourceItem as SourceBatchItem & {
+            translationContext?: {dictionaryVersion?: string};
+          }).translationContext?.dictionaryVersion ?? DEFAULT_DICTIONARY_VERSION;
           next[language] = cleanTranslatedLocale(
             incoming as unknown as Record<string, unknown>,
             language,
             translatedItem.sourceContentVersion,
             source.batchId,
+            dictionaryVersion,
           );
         } else if (current?.batchId === source.batchId) {
           next[language] = {...current, status: "pending"};
@@ -280,6 +313,48 @@ export const importTranslatedBatch = async (
   }
   report.finishedAt = new Date().toISOString();
   return report;
+};
+
+export type ReviewExport = {
+  schemaVersion: 1;
+  createdAt: string;
+  items: Array<{
+    documentId: string;
+    contentVersion: number;
+    sourceLanguage: TranslationLanguage;
+    content: ReturnType<typeof buildSourceContent>;
+    translations: Record<string, unknown>;
+  }>;
+};
+
+export const exportReviewRequired = async (
+  firestore: Firestore,
+  limit: number,
+): Promise<ReviewExport> => {
+  const snapshot = await firestore.collection("topics")
+    .where("hasTranslationReviewRequired", "==", true)
+    .limit(limit)
+    .get();
+  const items: ReviewExport["items"] = [];
+  for (const document of snapshot.docs) {
+    const data = document.data() as Record<string, unknown>;
+    if (data.isPublic === false || data.moderationStatus !== "approved") continue;
+    const reviewTranslations = Object.fromEntries(Object.entries(translationsOf(data))
+      .filter(([, translation]) => translation?.reviewRequired === true));
+    if (Object.keys(reviewTranslations).length === 0) continue;
+    const itemSnapshot = await document.ref.collection("items").get();
+    items.push({
+      documentId: document.id,
+      contentVersion: contentVersionOf(data),
+      sourceLanguage: sourceLanguageOf(data),
+      content: buildSourceContent(data, itemSnapshot.docs.map((item) => ({
+        id: item.id,
+        data: item.data() as Record<string, unknown>,
+      }))),
+      translations: reviewTranslations,
+    });
+  }
+  return {schemaVersion: 1, createdAt: new Date().toISOString(), items};
 };
 
 export const resetStaleProcessing = async (

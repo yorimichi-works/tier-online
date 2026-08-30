@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {importTranslatedBatch} from "./firestoreBatch";
+import {DEFAULT_DICTIONARY_VERSION} from "./phase1d";
 import {
+  DEFAULT_PROMPT_VERSION,
+  DEFAULT_TRANSLATION_VERSION,
   SourceBatch,
   TRANSLATION_LANGUAGES,
   TranslatedBatch,
@@ -77,7 +80,7 @@ test("source, current completed, manual, and processing locales are skipped", ()
     ...baseTopic("ja"),
     translations: {
       en: {status: "completed", sourceContentVersion: 3, translationMode: "auto"},
-      ko: {status: "failed", sourceContentVersion: 3, translationMode: "auto"},
+      ko: {status: "completed", sourceContentVersion: 2, translationMode: "auto"},
       "zh-TW": {status: "completed", sourceContentVersion: 2, translationMode: "manual"},
       "pt-BR": {status: "processing", sourceContentVersion: 3, translationMode: "auto"},
     },
@@ -94,6 +97,10 @@ test("source edits invalidate auto translations but preserve manual translations
   });
   assert.equal((next.en as Record<string, unknown>).status, "pending");
   assert.equal((next.ko as Record<string, unknown>).status, "completed");
+  assert.equal(
+    (next.ko as Record<string, unknown>).manualTranslationOutdated,
+    true,
+  );
 });
 
 test("source fingerprint changes only when translatable source changes", () => {
@@ -252,6 +259,21 @@ test("import dry-run does not write and a repeated import is idempotent", async 
   const imported = await importTranslatedBatch(fake.firestore, source, translated, false);
   assert.equal(fake.writes, 1);
   assert.equal(imported.statusCounts.completed, 1);
+  assert.deepEqual(imported.translationStats, {
+    total: 4,
+    cacheHits: 0,
+    codexTranslations: 4,
+    manualSkipped: 0,
+    failed: 0,
+    reviewRequired: 0,
+  });
+  const storedEnglish = (
+    (topics["topic-ja"] as Record<string, unknown>).translations as
+      Record<string, Record<string, unknown>>
+  ).en;
+  assert.equal(storedEnglish.translationVersion, DEFAULT_TRANSLATION_VERSION);
+  assert.equal(storedEnglish.promptVersion, DEFAULT_PROMPT_VERSION);
+  assert.equal(storedEnglish.dictionaryVersion, DEFAULT_DICTIONARY_VERSION);
   const repeated = await importTranslatedBatch(fake.firestore, source, translated, false);
   assert.deepEqual(repeated.idempotent, ["topic-ja"]);
   assert.equal(fake.writes, 1);

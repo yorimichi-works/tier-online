@@ -3,11 +3,23 @@ import {dirname, resolve} from "node:path";
 
 import {
   createBatchId,
+  exportReviewRequired,
   fetchAndClaimPending,
   importTranslatedBatch,
   initializeTranslationFirestore,
   resetStaleProcessing,
 } from "./firestoreBatch";
+import {
+  CommonTermsDictionary,
+  EnhancedSourceBatch,
+  OfficialNamesDictionary,
+  TranslationCache,
+  emptyTranslationCache,
+  invalidateCacheEntry,
+  mergeCachedAndCodexTranslations,
+  prepareBatchWithDictionaryAndCache,
+  updateExactCache,
+} from "./phase1d";
 import {
   SourceBatch,
   TranslatedBatch,
@@ -59,6 +71,19 @@ const writeJson = async (path: string, value: unknown) => {
   await writeFile(absolute, `${JSON.stringify(value, null, 2)}\n`, "utf8");
 };
 
+const readOptionalCache = async (path: string): Promise<TranslationCache> => {
+  try {
+    const cache = await readJson<TranslationCache>(path);
+    return cache.schemaVersion === 1 && cache.entries ?
+      cache : emptyTranslationCache();
+  } catch (error: unknown) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return emptyTranslationCache();
+    }
+    throw error;
+  }
+};
+
 const requireProject = (flags: Flags): string => {
   const project = stringFlag(flags, "project");
   if (!project) throw new Error("--project is required");
@@ -77,14 +102,19 @@ const confirmWriteProject = (flags: Flags, project: string) => {
 const usage = `
 Translation batch commands:
   fetch --project ID --confirm-project ID [--batch-size 100] [--output PATH]
+  merge --source PATH --cached PATH --codex PATH [--output PATH]
   validate --source PATH --translated PATH [--output PATH]
   import --project ID --source PATH --translated PATH --dry-run
   import --project ID --confirm-project ID --source PATH --translated PATH
   reset-stale --project ID --dry-run [--stale-hours 24]
   reset-stale --project ID --confirm-project ID [--stale-hours 24]
+  review-export --project ID [--limit 100] [--output PATH]
+  cache-invalidate --key HASH [--cache PATH]
 `;
 
 const repositoryRoot = resolve(__dirname, "..", "..", "..");
+const translationRoot = resolve(repositoryRoot, "scripts", "translation");
+const defaultCachePath = resolve(repositoryRoot, "tmp", "translations", "cache.json");
 
 export const runCli = async (args = process.argv.slice(2)): Promise<void> => {
   const [command, ...rest] = args;
@@ -111,6 +141,39 @@ export const runCli = async (args = process.argv.slice(2)): Promise<void> => {
     return;
   }
 
+  if (command === "merge") {
+    const sourcePath = stringFlag(flags, "source");
+    const cachedPath = stringFlag(flags, "cached");
+    const codexPath = stringFlag(flags, "codex");
+    if (!sourcePath || !cachedPath || !codexPath) {
+      throw new Error("merge requires --source, --cached, and --codex");
+    }
+    const source = await readJson<EnhancedSourceBatch>(sourcePath);
+    const cached = await readJson<TranslatedBatch>(cachedPath);
+    const codex = await readJson<TranslatedBatch>(codexPath);
+    const merged = mergeCachedAndCodexTranslations(source, cached, codex);
+    const output = stringFlag(flags, "output") ??
+      resolve(dirname(resolve(codexPath)), "translated.json");
+    await writeJson(output, merged);
+    console.log(JSON.stringify({
+      batchId: merged.batchId,
+      itemCount: merged.items.length,
+      output,
+    }, null, 2));
+    return;
+  }
+
+  if (command === "cache-invalidate") {
+    const key = stringFlag(flags, "key");
+    if (!key) throw new Error("cache-invalidate requires --key");
+    const cachePath = stringFlag(flags, "cache") ?? defaultCachePath;
+    const cache = await readOptionalCache(cachePath);
+    const invalidated = invalidateCacheEntry(cache, key);
+    if (invalidated) await writeJson(cachePath, cache);
+    console.log(JSON.stringify({key, invalidated, cachePath}, null, 2));
+    return;
+  }
+
   const project = requireProject(flags);
   const firestore = initializeTranslationFirestore(project);
   if (command === "fetch") {
@@ -128,19 +191,50 @@ export const runCli = async (args = process.argv.slice(2)): Promise<void> => {
     );
     const output = stringFlag(flags, "output") ??
       resolve(repositoryRoot, "tmp", "translations", batchId, "source.json");
-    const batch = await fetchAndClaimPending(firestore, {
+    const batchDirectory = dirname(resolve(output));
+    const cachePath = stringFlag(flags, "cache") ?? defaultCachePath;
+    const [common, official, cache] = await Promise.all([
+      readJson<CommonTermsDictionary>(resolve(
+        translationRoot,
+        "dictionaries",
+        "common_terms.json",
+      )),
+      readJson<OfficialNamesDictionary>(resolve(
+        translationRoot,
+        "dictionaries",
+        "official_names.json",
+      )),
+      readOptionalCache(cachePath),
+    ]);
+    const rawBatch = await fetchAndClaimPending(firestore, {
       batchId,
       batchSize,
       scanLimit,
       dryRun: flags["dry-run"] === true,
     });
-    await writeJson(output, batch);
+    const prepared = prepareBatchWithDictionaryAndCache(
+      rawBatch,
+      {common, official},
+      cache,
+    );
+    const cachedOutput = resolve(batchDirectory, "cached.json");
+    await Promise.all([
+      writeJson(output, prepared.source),
+      writeJson(cachedOutput, prepared.cached),
+      ...(flags["dry-run"] === true ? [] : [writeJson(cachePath, cache)]),
+    ]);
     console.log(JSON.stringify({
       batchId,
-      itemCount: batch.items.length,
+      itemCount: prepared.source.items.length,
+      total: prepared.cacheHits + prepared.codexTranslations,
+      cacheHits: prepared.cacheHits,
+      codexTranslations: prepared.codexTranslations,
       output,
+      cachedOutput,
+      cachePath,
       dryRun: flags["dry-run"] === true,
-      message: batch.items.length === 0 ? "No pending translations." : undefined,
+      message: prepared.source.items.length === 0 ?
+        "No pending translations." : undefined,
     }, null, 2));
     return;
   }
@@ -152,7 +246,7 @@ export const runCli = async (args = process.argv.slice(2)): Promise<void> => {
       throw new Error("import requires --source and --translated");
     }
     confirmWriteProject(flags, project);
-    const source = await readJson<SourceBatch>(sourcePath);
+    const source = await readJson<EnhancedSourceBatch>(sourcePath);
     const translated = await readJson<TranslatedBatch>(translatedPath);
     const report = await importTranslatedBatch(
       firestore,
@@ -160,7 +254,35 @@ export const runCli = async (args = process.argv.slice(2)): Promise<void> => {
       translated,
       flags["dry-run"] === true,
     );
+    if (flags["dry-run"] !== true) {
+      const cachePath = stringFlag(flags, "cache") ?? defaultCachePath;
+      const cache = await readOptionalCache(cachePath);
+      const stored = updateExactCache(
+        source,
+        translated,
+        cache,
+        new Set(report.updated.map((item) => item.documentId)),
+        new Set(report.skippedManual.map((item) =>
+          `${item.documentId}\u0000${item.language}`)),
+      );
+      await writeJson(cachePath, cache);
+      console.log(JSON.stringify({cachePath, ...stored}, null, 2));
+    }
     console.log(JSON.stringify(report, null, 2));
+    return;
+  }
+
+  if (command === "review-export") {
+    const limit = positiveInteger(flags, "limit", 100);
+    const output = stringFlag(flags, "output") ?? resolve(
+      repositoryRoot,
+      "tmp",
+      "translations",
+      `review-${new Date().toISOString().slice(0, 10)}.json`,
+    );
+    const review = await exportReviewRequired(firestore, limit);
+    await writeJson(output, review);
+    console.log(JSON.stringify({itemCount: review.items.length, output}, null, 2));
     return;
   }
 

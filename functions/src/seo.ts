@@ -65,23 +65,141 @@ function parseLocale(value: string | undefined): SupportedLocale {
   return isSupportedLocale(value) ? value : "ja";
 }
 
+// index.htmlの静的シェルと同等のhead/body(base href、viewport、背景色CSS、
+// Google Sign-In用meta、起動スクリプト)を複製したもの。以前はこれらを省略
+// していたため、<base href>が無いことでFlutterエンジンが自身のアセット
+// (AssetManifest/canvaskit等)を現在の深いパス基準で誤って解決してしまい、
+// 個別Tierページ等に直接アクセスすると背景色すら付かない白紙のまま起動に
+// 失敗していた。
 function renderShell(head: string): string {
   return `<!DOCTYPE html>
 <html>
 <head>
+  <base href="/">
   <meta charset="UTF-8">
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
   <meta name="theme-color" content="#0D0D0F">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black">
   <meta name="apple-mobile-web-app-title" content="Tier Online">
+  <meta name="google-signin-client_id" content="553966867727-fufba9jquashagb7gg8haf52ap99att3.apps.googleusercontent.com">
   <link rel="apple-touch-icon" href="/icons/Icon-192.png">
   <link rel="icon" type="image/png" href="/favicon.png"/>
   <link rel="manifest" href="/manifest.json">
+  <link rel="preload" href="/assets/assets/fonts/NotoSansJP-TierSubset.ttf" as="font" type="font/ttf" crossorigin>
+  <link rel="preload" href="/assets/assets/fonts/NotoSansKR-TierSubset.ttf" as="font" type="font/ttf" crossorigin>
+  <style>
+    @font-face {
+      font-family: "TierNotoSansJP";
+      src: url("/assets/assets/fonts/NotoSansJP-TierSubset.ttf") format("truetype");
+      font-display: swap;
+      font-style: normal;
+      font-weight: 500;
+    }
+    @font-face {
+      font-family: "TierNotoSansKR";
+      src: url("/assets/assets/fonts/NotoSansKR-TierSubset.ttf") format("truetype");
+      font-display: swap;
+      font-style: normal;
+      font-weight: 500;
+    }
+    html, body {
+      height: 100%;
+      background: #0D0D0F;
+      font-family: "TierNotoSansJP", "TierNotoSansKR", "Noto Sans",
+        "Noto Sans TC", "Noto Sans JP", "Noto Sans KR", "PingFang TC",
+        "Microsoft JhengHei", "Yu Gothic", YuGothic,
+        "Yu Gothic UI", "Hiragino Kaku Gothic ProN", Meiryo,
+        "Apple SD Gothic Neo", "Malgun Gothic", Arial, Helvetica, sans-serif;
+      margin: 0;
+    }
+    #app-loading {
+      align-items: center;
+      background: #0D0D0F;
+      color: #F4F4F7;
+      display: flex;
+      inset: 0;
+      justify-content: center;
+      position: fixed;
+      z-index: 2147483647;
+    }
+    #app-loading[hidden] { display: none; }
+    .app-loading-content {
+      align-items: center;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+    .app-loading-mark {
+      animation: loading-pulse 1s ease-in-out infinite alternate;
+      background: linear-gradient(135deg, #5AC8D8, #8B7CFF);
+      border-radius: 12px;
+      height: 8px;
+      width: 72px;
+    }
+    .app-loading-label {
+      font-family: Arial, "PingFang TC", "Microsoft JhengHei",
+        "Yu Gothic", YuGothic, Meiryo,
+        "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+      font-size: 16px;
+      font-weight: 700;
+      letter-spacing: .02em;
+    }
+    @keyframes loading-pulse {
+      from { opacity: .45; transform: scaleX(.72); }
+      to { opacity: 1; transform: scaleX(1); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .app-loading-mark { animation: none; }
+    }
+  </style>
 ${head}
 </head>
 <body>
-  <script src="/flutter_bootstrap.js" async></script>
+  <div id="app-loading" role="status" aria-live="polite">
+    <div class="app-loading-content">
+      <div class="app-loading-mark" aria-hidden="true"></div>
+      <div class="app-loading-label" id="app-loading-label">Tier Online</div>
+    </div>
+  </div>
+  <script>
+    window.addEventListener('flutter-first-frame', () => {
+      window.setTimeout(() => {
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            document.getElementById('app-loading')?.setAttribute('hidden', '');
+          });
+        });
+      }, 250);
+    }, { once: true });
+  </script>
+  <script>
+    (async () => {
+      if ('serviceWorker' in navigator) {
+        try {
+          const registrations = await navigator.serviceWorker.getRegistrations();
+          await Promise.all(
+            registrations.map((registration) => registration.unregister()),
+          );
+          if ('caches' in window) {
+            const keys = await caches.keys();
+            await Promise.all(
+              keys
+                .filter((key) => key.startsWith('flutter-app-cache'))
+                .map((key) => caches.delete(key)),
+            );
+          }
+        } catch (_) {
+          // Always continue to Flutter, even when browser storage is blocked.
+        }
+      }
+      const bootstrap = document.createElement('script');
+      bootstrap.src = \`/flutter_bootstrap.js?v=\${Date.now()}\`;
+      bootstrap.async = true;
+      document.body.appendChild(bootstrap);
+    })();
+  </script>
 </body>
 </html>`;
 }

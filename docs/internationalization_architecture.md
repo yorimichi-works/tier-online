@@ -44,6 +44,8 @@ Dart側の正本は `lib/domain/internationalization.dart`、Functions側の正�
 詳細は [future_multilingual_translation.md](future_multilingual_translation.md) を参照する。
 Phase 1-Cの半自動運用と安全境界は
 [phase_1c_translation_batch.md](phase_1c_translation_batch.md) を参照する。
+Phase 1-Dの辞書・完全一致キャッシュ・再翻訳制御は
+[phase_1d_translation_quality.md](phase_1d_translation_quality.md) を参照する。
 
 ## 言語・地域を追加するとき
 
