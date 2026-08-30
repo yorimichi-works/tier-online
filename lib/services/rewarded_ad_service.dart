@@ -7,13 +7,11 @@ import 'package:google_mobile_ads/google_mobile_ads.dart';
 ///
 /// google_mobile_ads は Web をサポートしないため、Web上では常に利用不可
 /// (`isSupported == false`)として扱う。
-/// 広告ユニットIDはGoogle公式のテスト用IDを使用している。本番リリース前に
-/// 実際の広告ユニットIDへ差し替えること。
+/// 広告ユニットIDは tier表オンライン のリワード広告枠(本番)。
 class RewardedAdService {
   RewardedAdService();
 
-  static const _testAndroidUnitId = 'ca-app-pub-3940256099942544/5224354917';
-  static const _testIosUnitId = 'ca-app-pub-3940256099942544/1712485313';
+  static const _rewardedUnitId = 'ca-app-pub-3186852093801241/6288111677';
 
   RewardedAd? _ad;
   bool _initialized = false;
@@ -23,9 +21,7 @@ class RewardedAdService {
       (defaultTargetPlatform == TargetPlatform.android ||
           defaultTargetPlatform == TargetPlatform.iOS);
 
-  String get _adUnitId => defaultTargetPlatform == TargetPlatform.iOS
-      ? _testIosUnitId
-      : _testAndroidUnitId;
+  String get _adUnitId => _rewardedUnitId;
 
   Future<void> _ensureInitialized() async {
     if (_initialized || !isSupported) return;

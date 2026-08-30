@@ -89,6 +89,20 @@ class _AccountSheetBodyState extends State<_AccountSheetBody> {
     ).showSnackBar(SnackBar(content: Text(_authErrorMessage(result.status))));
   }
 
+  Future<void> _submitGoogle() async {
+    setState(() => _submitting = true);
+    final result = await widget.appState.signInWithGoogle();
+    if (!mounted) return;
+    setState(() => _submitting = false);
+    if (result.isSuccess) {
+      Navigator.of(context).pop();
+      return;
+    }
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(_authErrorMessage(result.status))));
+  }
+
   Future<void> _resetPassword() async {
     final email = _email.text.trim();
     if (email.isEmpty) return;
@@ -179,6 +193,32 @@ class _AccountSheetBodyState extends State<_AccountSheetBody> {
                   : Text(
                       context.l10n.t(_isSignUp ? 'createAccount' : 'signIn'),
                     ),
+            ),
+          ),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              Expanded(child: Divider(color: Theme.of(context).colorScheme.outline)),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 10),
+                child: Text(
+                  context.l10n.t('orDivider'),
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    fontSize: 12,
+                  ),
+                ),
+              ),
+              Expanded(child: Divider(color: Theme.of(context).colorScheme.outline)),
+            ],
+          ),
+          const SizedBox(height: 16),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: _submitting ? null : _submitGoogle,
+              icon: const Icon(Icons.g_mobiledata_rounded, size: 26),
+              label: Text(context.l10n.t('signInWithGoogle')),
             ),
           ),
         ],
