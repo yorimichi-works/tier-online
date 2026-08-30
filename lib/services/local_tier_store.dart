@@ -37,6 +37,17 @@ class LocalTierStore {
     );
   }
 
+  Future<void> deleteTopic(String topicId) async {
+    final preferences = await SharedPreferences.getInstance();
+    final ids = preferences.getStringList(_topicIdsKey) ?? <String>[];
+    ids.remove(topicId);
+    await preferences.setStringList(_topicIdsKey, ids);
+    await preferences.remove('localTopic.$topicId');
+    await preferences.remove('submission.$topicId');
+    await preferences.remove('talks.$topicId');
+    await preferences.remove('placements.$topicId');
+  }
+
   Future<void> saveSubmission(UserTierSubmission submission) async {
     final preferences = await SharedPreferences.getInstance();
     await preferences.setString(

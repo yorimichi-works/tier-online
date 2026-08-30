@@ -1,9 +1,12 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
 import '../l10n/app_localizations.dart';
 import '../widgets/common_widgets.dart';
 import '../services/app_state.dart';
 import 'account_sheet.dart';
+import 'admin_moderation_screen.dart';
 
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({
@@ -53,6 +56,7 @@ class SettingsScreen extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 16),
+            if (!appState.isAnonymous) const _AdminEntry(),
           ],
           Card(
             child: Column(
@@ -359,6 +363,38 @@ class _ThemeModeOption extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+class _AdminEntry extends StatelessWidget {
+  const _AdminEntry();
+
+  @override
+  Widget build(BuildContext context) {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return const SizedBox.shrink();
+    return FutureBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+      future: FirebaseFirestore.instance.collection('admins').doc(uid).get(),
+      builder: (context, snapshot) {
+        if (snapshot.data?.exists != true) return const SizedBox.shrink();
+        return Column(
+          children: [
+            Card(
+              child: ListTile(
+                leading: const Icon(Icons.shield_outlined),
+                title: const Text('モデレーション管理'),
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => const AdminModerationScreen(),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+          ],
+        );
+      },
     );
   }
 }

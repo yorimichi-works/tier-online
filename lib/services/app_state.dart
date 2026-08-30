@@ -1,7 +1,9 @@
 import 'dart:async';
 
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../l10n/app_localizations.dart';
@@ -10,6 +12,36 @@ import '../repositories/cloud_tier_repository.dart';
 import '../repositories/tier_repository.dart';
 import 'local_tier_store.dart';
 import 'tier_aggregation_service.dart';
+
+class DailyCreateStatus {
+  const DailyCreateStatus({
+    required this.dailyTierCount,
+    required this.adBonusCount,
+    required this.baseLimit,
+    required this.maxAdBonus,
+    required this.allowed,
+    required this.remaining,
+  });
+
+  factory DailyCreateStatus.fromMap(Map<String, dynamic> data) =>
+      DailyCreateStatus(
+        dailyTierCount: data['dailyTierCount'] as int? ?? 0,
+        adBonusCount: data['adBonusCount'] as int? ?? 0,
+        baseLimit: data['baseLimit'] as int? ?? 0,
+        maxAdBonus: data['maxAdBonus'] as int? ?? 0,
+        allowed: data['allowed'] as int? ?? 0,
+        remaining: data['remaining'] as int? ?? 0,
+      );
+
+  final int dailyTierCount;
+  final int adBonusCount;
+  final int baseLimit;
+  final int maxAdBonus;
+  final int allowed;
+  final int remaining;
+
+  bool get canCreate => remaining > 0;
+}
 
 enum AuthResultStatus {
   success,
@@ -76,6 +108,7 @@ class AppState extends ChangeNotifier {
   final Set<String> _likedTopicIds = {};
   final Map<String, String> _talkReactions = {};
   final Set<String> _reportedTalkTargets = {};
+  final Set<String> _reportedTopicIds = {};
   String _anonymousId = '';
   bool _initialized = false;
   Object? _cloudError;
@@ -100,12 +133,49 @@ class AppState extends ChangeNotifier {
     AppLocale.ko => '나',
     AppLocale.en => 'You',
   };
+  String get anonymousId => _anonymousId;
 
   List<TierTopic> get topics => _repository.getAll();
+  List<TierTopic> get publicTopics =>
+      topics.where((topic) => topic.isPublic).toList(growable: false);
   Map<TierRank, List<String>> placementsFor(String topicId) => {
     for (final rank in TierRank.values)
       rank: List.unmodifiable(_placements[topicId]?[rank] ?? const []),
   };
+
+  bool hasSubmitted(String topicId) =>
+      _placements[topicId]?.values.any((items) => items.isNotEmpty) ?? false;
+
+  /// 指定したユーザーの指定topicIdへの回答(placements)を取得する。
+  /// 自分自身のuserId(anonymousId)の場合はローカルのplacementsを、
+  /// それ以外はクラウド上のsubmissions一覧から該当ユーザーを探す。
+  Future<UserTierSubmission?> loadUserSubmission(
+    String topicId,
+    String userId,
+  ) async {
+    if (userId == _anonymousId) {
+      if (!hasSubmitted(topicId)) return null;
+      return UserTierSubmission(
+        id: '$_anonymousId-$topicId',
+        topicId: topicId,
+        userId: _anonymousId,
+        createdAt: DateTime.now(),
+        placements: _placements[topicId]!,
+        region: _region,
+      );
+    }
+    if (_cloudRepository == null) return null;
+    try {
+      final submissions = await _cloudRepository.loadSubmissions(topicId);
+      for (final submission in submissions) {
+        if (submission.userId == userId) return submission;
+      }
+    } on Object catch (error) {
+      _cloudError = error;
+      notifyListeners();
+    }
+    return null;
+  }
 
   List<TalkPost> talksFor(TierTopic topic) {
     final local = _localTalks[topic.id] ?? const [];
@@ -168,6 +238,9 @@ class AppState extends ChangeNotifier {
     }
     _reportedTalkTargets.addAll(
       preferences.getStringList('reportedTalkTargets') ?? const [],
+    );
+    _reportedTopicIds.addAll(
+      preferences.getStringList('reportedTopicIds') ?? const [],
     );
     if (_anonymousId.isEmpty) {
       _anonymousId = 'local-${DateTime.now().microsecondsSinceEpoch}';
@@ -389,23 +462,52 @@ class AppState extends ChangeNotifier {
     notifyListeners();
     await _localStore.saveTopic(topic);
     if (_cloudRepository != null) {
+      final uploaded = await _cloudRepository.saveTopic(topic);
+      _cloudTopicIds.add(uploaded.id);
+      _repository.add(uploaded);
+      await _localStore.saveTopic(uploaded);
+    }
+    await setPlacements(topic.id, placements);
+  }
+
+  Future<void> setTopicPublic(TierTopic topic, bool isPublic) async {
+    if (!isOwnTopic(topic) || topic.isPublic == isPublic) return;
+    final updated = topic.copyWith(isPublic: isPublic);
+    _repository.add(updated);
+    notifyListeners();
+    await _localStore.saveTopic(updated);
+    if (_cloudRepository != null && _cloudTopicIds.contains(topic.id)) {
       try {
-        final uploaded = await _cloudRepository.saveTopic(topic);
-        _cloudTopicIds.add(uploaded.id);
-        _repository.add(uploaded);
-        await _localStore.saveTopic(uploaded);
+        await _cloudRepository.setTopicPublic(topic.id, isPublic: isPublic);
       } on Object catch (error) {
         _cloudError = error;
+        _repository.add(topic);
+        await _localStore.saveTopic(topic);
         notifyListeners();
       }
     }
-    await setPlacements(topic.id, placements);
+  }
+
+  Future<void> deleteOwnTopic(TierTopic topic) async {
+    if (!isOwnTopic(topic)) return;
+    if (_cloudRepository != null && _cloudTopicIds.contains(topic.id)) {
+      await _cloudRepository.deleteTopic(topic.id);
+      _cloudTopicIds.remove(topic.id);
+    }
+    _repository.remove(topic.id);
+    _placements.remove(topic.id);
+    _localTalks.remove(topic.id);
+    _loaded.remove(topic.id);
+    _likedTopicIds.remove(topic.id);
+    await _localStore.deleteTopic(topic.id);
+    notifyListeners();
   }
 
   Future<void> postTalk(
     String topicId, {
     required String body,
     required TierRank rank,
+    bool attachOwnTier = false,
   }) async {
     final posts = _localTalks.putIfAbsent(topicId, () => []);
     posts.insert(
@@ -417,6 +519,8 @@ class AppState extends ChangeNotifier {
         rank: rank,
         minutesAgo: 0,
         createdAt: DateTime.now(),
+        authorUserId: attachOwnTier ? _anonymousId : null,
+        attachedTier: attachOwnTier,
       ),
     );
     notifyListeners();
@@ -567,9 +671,7 @@ class AppState extends ChangeNotifier {
     String topicId, {
     required String postId,
     String? replyId,
-  }) => _reportedTalkTargets.contains(
-    '$topicId|$postId|${replyId ?? 'root'}',
-  );
+  }) => _reportedTalkTargets.contains('$topicId|$postId|${replyId ?? 'root'}');
 
   Future<bool> reportTalk(
     String topicId, {
@@ -653,6 +755,108 @@ class AppState extends ChangeNotifier {
     }
   }
 
+  Future<AuthResult> signInWithGoogle() async {
+    final auth = _auth;
+    if (auth == null) return const AuthResult(AuthResultStatus.generic);
+    try {
+      final googleSignIn = GoogleSignIn();
+      final googleUser = await googleSignIn.signIn();
+      if (googleUser == null) {
+        return const AuthResult(AuthResultStatus.generic);
+      }
+      final googleAuth = await googleUser.authentication;
+      final credential = GoogleAuthProvider.credential(
+        accessToken: googleAuth.accessToken,
+        idToken: googleAuth.idToken,
+      );
+      final current = auth.currentUser;
+      if (current != null && current.isAnonymous) {
+        await current.linkWithCredential(credential);
+      } else {
+        await auth.signInWithCredential(credential);
+      }
+      notifyListeners();
+      return const AuthResult(AuthResultStatus.success);
+    } on FirebaseAuthException catch (error) {
+      return AuthResult.fromException(error);
+    } on Object catch (error) {
+      _cloudError = error;
+      notifyListeners();
+      return const AuthResult(AuthResultStatus.generic);
+    }
+  }
+
+  /// 本日のTier表作成状況(基本枠・広告ボーナス枠)を取得する。
+  Future<DailyCreateStatus?> loadDailyCreateStatus() async {
+    if (_auth == null) return null;
+    try {
+      final callable = FirebaseFunctions.instance.httpsCallable(
+        'getDailyCreateStatus',
+      );
+      final result = await callable.call<Map<String, dynamic>>();
+      return DailyCreateStatus.fromMap(
+        Map<String, dynamic>.from(result.data as Map),
+      );
+    } on Object catch (error) {
+      _cloudError = error;
+      notifyListeners();
+      return null;
+    }
+  }
+
+  /// リワード広告視聴による作成ボーナス+1を申請する。広告視聴が完了した
+  /// 場合にのみ呼び出すこと(トークンはサーバー側で有効期限・一回性を検証)。
+  Future<DailyCreateStatus?> claimCreateAdBonus() async {
+    if (isAnonymous) return null;
+    try {
+      final tokenCallable = FirebaseFunctions.instance.httpsCallable(
+        'requestCreateAdBonusToken',
+      );
+      final tokenResult = await tokenCallable.call<Map<String, dynamic>>();
+      final token = (tokenResult.data as Map)['token'] as String;
+
+      // 実際の広告視聴はUI側(RewardedAdService)で行われ、視聴完了後にこの
+      // メソッドが呼ばれる想定。ここではトークンを確定させるのみ。
+      final confirmCallable = FirebaseFunctions.instance.httpsCallable(
+        'confirmCreateAdBonus',
+      );
+      await confirmCallable.call<Map<String, dynamic>>({'token': token});
+      return await loadDailyCreateStatus();
+    } on Object catch (error) {
+      _cloudError = error;
+      notifyListeners();
+      return null;
+    }
+  }
+
+  bool isTopicReported(String topicId) => _reportedTopicIds.contains(topicId);
+
+  Future<bool> reportTopic(
+    String topicId, {
+    String reason = 'user_report',
+  }) async {
+    if (!_reportedTopicIds.add(topicId)) return false;
+    notifyListeners();
+    final preferences = await SharedPreferences.getInstance();
+    await preferences.setStringList(
+      'reportedTopicIds',
+      _reportedTopicIds.toList(growable: false),
+    );
+    if (_cloudRepository != null) {
+      try {
+        final submitted = await _cloudRepository.reportTopic(
+          topicId,
+          reason: reason,
+        );
+        if (!submitted) return false;
+      } on Object catch (error) {
+        _cloudError = error;
+        notifyListeners();
+      }
+    }
+    return true;
+  }
+
   Future<void> signOut() async {
     final auth = _auth;
     if (auth == null) return;
@@ -672,8 +876,12 @@ class AppState extends ChangeNotifier {
   }
 
   Iterable<TierTopic> get startedTopics => topics.where(
-    (topic) =>
-        (_placements[topic.id]?.values.any((items) => items.isNotEmpty) ??
-        false),
+    (topic) => isOwnTopic(topic) || hasSubmitted(topic.id),
+  );
+
+  Iterable<TierTopic> get createdTopics => topics.where(isOwnTopic);
+
+  Iterable<TierTopic> get joinedTopics => topics.where(
+    (topic) => !isOwnTopic(topic) && hasSubmitted(topic.id),
   );
 }

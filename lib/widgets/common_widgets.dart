@@ -1,10 +1,155 @@
 import 'dart:ui' as ui;
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
 import '../l10n/app_localizations.dart';
 import '../theme/app_theme.dart';
 import '../utils/app_breakpoints.dart';
+
+/// Adds browser-style middle-mouse auto scrolling to a Flutter scroll view.
+///
+/// Flutter Web renders inside a canvas, so the browser cannot discover the
+/// inner [Scrollable] that should react to a pressed mouse wheel. Holding the
+/// middle button and moving above or below the press point scrolls the supplied
+/// controller continuously. Touch, left-button dragging and item DnD remain
+/// untouched.
+class MiddleMouseAutoScroll extends StatefulWidget {
+  const MiddleMouseAutoScroll({
+    super.key,
+    required this.controller,
+    required this.child,
+  });
+
+  final ScrollController controller;
+  final Widget child;
+
+  @override
+  State<MiddleMouseAutoScroll> createState() => _MiddleMouseAutoScrollState();
+}
+
+class WorldLanguageFilter extends StatelessWidget {
+  const WorldLanguageFilter({
+    super.key,
+    required this.enabled,
+    required this.selected,
+    required this.onEnabledChanged,
+    required this.onLanguageChanged,
+  });
+
+  final bool enabled;
+  final Set<AppLocale> selected;
+  final ValueChanged<bool> onEnabledChanged;
+  final void Function(AppLocale locale, bool selected) onLanguageChanged;
+
+  @override
+  Widget build(BuildContext context) => Material(
+    color: Theme.of(context).colorScheme.surface,
+    clipBehavior: Clip.antiAlias,
+    shape: RoundedRectangleBorder(
+      borderRadius: BorderRadius.circular(15),
+      side: BorderSide(color: Theme.of(context).colorScheme.outline),
+    ),
+    child: Padding(
+      padding: const EdgeInsets.fromLTRB(13, 5, 13, 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          CheckboxListTile(
+            value: enabled,
+            onChanged: (value) => onEnabledChanged(value ?? false),
+            contentPadding: EdgeInsets.zero,
+            controlAffinity: ListTileControlAffinity.leading,
+            dense: true,
+            title: Text(
+              context.l10n.t('viewWorldTiers'),
+              style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w900),
+            ),
+            subtitle: Text(
+              context.l10n.t('viewWorldTiersHelp'),
+              style: const TextStyle(fontSize: 11),
+            ),
+          ),
+          AnimatedSize(
+            duration: const Duration(milliseconds: 180),
+            alignment: Alignment.topCenter,
+            child: enabled
+                ? Padding(
+                    padding: const EdgeInsets.only(left: 4, top: 4),
+                    child: Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        for (final locale in AppLocale.values)
+                          FilterChip(
+                            selected: selected.contains(locale),
+                            showCheckmark: true,
+                            label: Text(locale.nativeName),
+                            onSelected: (value) =>
+                                onLanguageChanged(locale, value),
+                          ),
+                      ],
+                    ),
+                  )
+                : const SizedBox.shrink(),
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
+class _MiddleMouseAutoScrollState extends State<MiddleMouseAutoScroll> {
+  Offset? _lastPointer;
+
+  bool get _active => _lastPointer != null;
+
+  void _start(PointerDownEvent event) {
+    if (event.kind != PointerDeviceKind.mouse ||
+        event.buttons & kMiddleMouseButton == 0) {
+      return;
+    }
+    _lastPointer = event.position;
+    setState(() {});
+  }
+
+  void _move(PointerMoveEvent event) {
+    if (!_active) return;
+    if (event.buttons & kMiddleMouseButton == 0) {
+      _stop();
+      return;
+    }
+    final previous = _lastPointer!;
+    _lastPointer = event.position;
+    if (!widget.controller.hasClients) return;
+    final delta = event.position.dy - previous.dy;
+    final position = widget.controller.position;
+    final target = (position.pixels - delta).clamp(
+      position.minScrollExtent,
+      position.maxScrollExtent,
+    );
+    if (target != position.pixels) position.jumpTo(target);
+  }
+
+  void _stop() {
+    if (!_active) return;
+    _lastPointer = null;
+    if (mounted) setState(() {});
+  }
+
+  @override
+  Widget build(BuildContext context) => MouseRegion(
+    cursor: _active ? SystemMouseCursors.grabbing : MouseCursor.defer,
+    child: Listener(
+      behavior: HitTestBehavior.translucent,
+      onPointerDown: _start,
+      onPointerMove: _move,
+      onPointerUp: (_) => _stop(),
+      onPointerCancel: (_) => _stop(),
+      child: widget.child,
+    ),
+  );
+}
 
 class ContentFrame extends StatelessWidget {
   const ContentFrame({

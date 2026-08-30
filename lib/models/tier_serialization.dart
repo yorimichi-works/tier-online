@@ -38,6 +38,8 @@ abstract final class TierSerialization {
     'replies': post.replies.map(replyToJson).toList(),
     'upvotes': post.upvotes,
     'downvotes': post.downvotes,
+    'authorUserId': post.authorUserId,
+    'attachedTier': post.attachedTier,
   };
 
   static TalkPost talkFromJson(Map<String, Object?> json) => TalkPost(
@@ -54,6 +56,8 @@ abstract final class TierSerialization {
         .toList(),
     upvotes: json['upvotes'] as int? ?? 0,
     downvotes: json['downvotes'] as int? ?? 0,
+    authorUserId: json['authorUserId'] as String?,
+    attachedTier: json['attachedTier'] as bool? ?? false,
   );
 
   static Map<String, Object?> replyToJson(TalkReply reply) => {
@@ -103,6 +107,7 @@ abstract final class TierSerialization {
     'sourceTierId': topic.sourceTierId,
     'sourceTemplateId': topic.sourceTemplateId,
     'isLanguageNeutral': topic.isLanguageNeutral,
+    'isPublic': topic.isPublic,
   };
 
   static TierTopic topicFromJson(Map<String, Object?> json) => TierTopic(
@@ -139,6 +144,7 @@ abstract final class TierSerialization {
     sourceTierId: json['sourceTierId'] as String?,
     sourceTemplateId: json['sourceTemplateId'] as String?,
     isLanguageNeutral: json['isLanguageNeutral'] as bool? ?? false,
+    isPublic: json['isPublic'] as bool? ?? true,
   );
 
   static Map<String, Object?> submissionToJson(UserTierSubmission value) => {

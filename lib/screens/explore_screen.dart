@@ -28,6 +28,8 @@ class _ExploreScreenState extends State<ExploreScreen> {
   late final TextEditingController _controller = TextEditingController(
     text: _query,
   );
+  bool _viewWorldTiers = false;
+  final Set<AppLocale> _languages = {};
   @override
   void didUpdateWidget(covariant ExploreScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
@@ -45,21 +47,31 @@ class _ExploreScreenState extends State<ExploreScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (!_viewWorldTiers) {
+      _languages
+        ..clear()
+        ..add(widget.appState.locale);
+    }
     final query = _query.toLowerCase();
     final topics =
-        widget.appState.topics
+        widget.appState.publicTopics
             .where(
               (topic) =>
-                  query.isEmpty ||
-                  topic.title.toLowerCase().contains(query) ||
-                  topic.description.toLowerCase().contains(query) ||
-                  topic.tags.any((tag) => tag.toLowerCase().contains(query)) ||
-                  topic.creatorName.toLowerCase().contains(query) ||
-                  topic.category.toLowerCase().contains(query) ||
-                  topic.categoryId.toLowerCase().contains(query) ||
-                  topic.items.any(
-                    (item) => item.name?.toLowerCase().contains(query) ?? false,
-                  ),
+                  (topic.isLanguageNeutral ||
+                      _languages.contains(topic.contentLanguage)) &&
+                  (query.isEmpty ||
+                      topic.title.toLowerCase().contains(query) ||
+                      topic.description.toLowerCase().contains(query) ||
+                      topic.tags.any(
+                        (tag) => tag.toLowerCase().contains(query),
+                      ) ||
+                      topic.creatorName.toLowerCase().contains(query) ||
+                      topic.category.toLowerCase().contains(query) ||
+                      topic.categoryId.toLowerCase().contains(query) ||
+                      topic.items.any(
+                        (item) =>
+                            item.name?.toLowerCase().contains(query) ?? false,
+                      )),
             )
             .toList()
           ..sort((a, b) => _priority(b).compareTo(_priority(a)));
@@ -99,6 +111,24 @@ class _ExploreScreenState extends State<ExploreScreen> {
                         icon: const Icon(Icons.close_rounded),
                       ),
               ),
+            ),
+            const SizedBox(height: 13),
+            WorldLanguageFilter(
+              enabled: _viewWorldTiers,
+              selected: _languages,
+              onEnabledChanged: (value) => setState(() {
+                _viewWorldTiers = value;
+                if (_languages.isEmpty) {
+                  _languages.add(widget.appState.locale);
+                }
+              }),
+              onLanguageChanged: (locale, selected) => setState(() {
+                if (selected) {
+                  _languages.add(locale);
+                } else {
+                  _languages.remove(locale);
+                }
+              }),
             ),
             const SizedBox(height: 22),
             SectionHeader(

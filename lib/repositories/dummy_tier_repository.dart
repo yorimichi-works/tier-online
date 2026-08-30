@@ -22,6 +22,9 @@ class DummyTierRepository implements TierRepository {
     _topics.insert(0, topic);
   }
 
+  @override
+  void remove(String id) => _topics.removeWhere((topic) => topic.id == id);
+
   static List<TierTopic> _seed() => [
     _make(
       'yokai',

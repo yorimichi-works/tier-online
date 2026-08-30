@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 
@@ -14,13 +15,16 @@ class FirebaseTierRepository implements CloudTierRepository {
     required FirebaseAuth auth,
     FirebaseFirestore? firestore,
     FirebaseStorage? storage,
+    FirebaseFunctions? functions,
   }) : _auth = auth,
        _firestore = firestore ?? FirebaseFirestore.instance,
-       _storage = storage ?? FirebaseStorage.instance;
+       _storage = storage ?? FirebaseStorage.instance,
+       _functions = functions ?? FirebaseFunctions.instance;
 
   final FirebaseAuth _auth;
   final FirebaseFirestore _firestore;
   final FirebaseStorage _storage;
+  final FirebaseFunctions _functions;
 
   @override
   String get currentUserId => _auth.currentUser!.uid;
@@ -61,11 +65,24 @@ class FirebaseTierRepository implements CloudTierRepository {
 
   @override
   Future<List<TierTopic>> loadTopics() async {
-    final snapshot = await _topics
-        .orderBy('createdAt', descending: true)
-        .limit(50)
-        .get();
-    return Future.wait(snapshot.docs.map(_topicFromDocument));
+    final snapshots = await Future.wait([
+      _topics.where('isPublic', isEqualTo: true).limit(100).get(),
+      _topics.where('creatorId', isEqualTo: currentUserId).limit(100).get(),
+    ]);
+    final documents = <String, QueryDocumentSnapshot<Map<String, dynamic>>>{};
+    for (final snapshot in snapshots) {
+      for (final document in snapshot.docs) {
+        documents[document.id] = document;
+      }
+    }
+    final topics = await Future.wait(documents.values.map(_topicFromDocument));
+    topics.removeWhere(
+      (topic) =>
+          topic.creatorId != currentUserId &&
+          !const {'approved', 'flagged'}.contains(topic.moderationStatus),
+    );
+    topics.sort((a, b) => a.createdDaysAgo.compareTo(b.createdDaysAgo));
+    return topics;
   }
 
   Future<TierTopic> _topicFromDocument(
@@ -121,12 +138,15 @@ class FirebaseTierRepository implements CloudTierRepository {
       sourceTierId: data['sourceTierId'] as String?,
       sourceTemplateId: data['sourceTemplateId'] as String?,
       isLanguageNeutral: data['isLanguageNeutral'] as bool? ?? false,
+      moderationStatus: data['moderationStatus'] as String? ?? 'approved',
+      reportCount: data['reportCount'] as int? ?? 0,
+      createdByAnonymous: data['createdByAnonymous'] as bool? ?? false,
+      isPublic: data['isPublic'] as bool? ?? true,
     );
   }
 
   @override
   Future<TierTopic> saveTopic(TierTopic topic) async {
-    final topicReference = _topics.doc(topic.id);
     final uploadedItems = <TierItem>[];
     for (final item in topic.items) {
       var imageUrl = item.imageUrl;
@@ -156,40 +176,46 @@ class FirebaseTierRepository implements CloudTierRepository {
       );
     }
 
-    final batch = _firestore.batch();
-    batch.set(topicReference, {
-      'title': topic.title,
-      'description': topic.description,
-      'tags': topic.tags,
-      'category': topic.category,
-      'categoryId': topic.categoryId,
-      'contentLanguage': topic.contentLanguage.code,
-      'targetRegion': topic.targetRegion,
-      'sourceTierId': topic.sourceTierId,
-      'sourceTemplateId': topic.sourceTemplateId,
-      'isLanguageNeutral': topic.isLanguageNeutral,
-      'creatorName': topic.creatorName,
-      'creatorId': currentUserId,
-      'participants': topic.participants,
-      'likeCount': topic.likeCount,
-      'community': topic.community.map(
-        (key, value) => MapEntry(key, value.name),
-      ),
-      'isTrending': topic.isTrending,
-      'createdAt': FieldValue.serverTimestamp(),
-      'updatedAt': FieldValue.serverTimestamp(),
-    }, SetOptions(merge: true));
-    for (final item in uploadedItems) {
-      batch.set(topicReference.collection('items').doc(item.id), {
-        'name': item.name,
-        'imageUrl': item.imageUrl,
-        'sortIndex': item.sortIndex,
-        'colorSeed': item.colorSeed,
-        'contentLanguage': item.contentLanguage?.code,
-        'isLanguageNeutral': item.isLanguageNeutral,
+    final callable = _functions.httpsCallable('publishTierTopic');
+    final Map<String, dynamic> response;
+    try {
+      final result = await callable.call<Map<String, dynamic>>({
+        'topicId': topic.id,
+        'title': topic.title,
+        'description': topic.description,
+        'tags': topic.tags,
+        'category': topic.category,
+        'categoryId': topic.categoryId,
+        'contentLanguage': topic.contentLanguage.code,
+        'targetRegion': topic.targetRegion,
+        'sourceTierId': topic.sourceTierId,
+        'sourceTemplateId': topic.sourceTemplateId,
+        'isLanguageNeutral': topic.isLanguageNeutral,
+        'creatorName': topic.creatorName,
+        'participants': topic.participants,
+        'likeCount': topic.likeCount,
+        'community': topic.community.map(
+          (key, value) => MapEntry(key, value.name),
+        ),
+        'isTrending': topic.isTrending,
+        'isPublic': topic.isPublic,
+        'items': [
+          for (final item in uploadedItems)
+            {
+              'id': item.id,
+              'name': item.name,
+              'imageUrl': item.imageUrl,
+              'sortIndex': item.sortIndex,
+              'colorSeed': item.colorSeed,
+              'contentLanguage': item.contentLanguage?.code,
+              'isLanguageNeutral': item.isLanguageNeutral,
+            },
+        ],
       });
+      response = Map<String, dynamic>.from(result.data as Map);
+    } on FirebaseFunctionsException {
+      rethrow;
     }
-    await batch.commit();
     return TierTopic(
       id: topic.id,
       title: topic.title,
@@ -211,7 +237,24 @@ class FirebaseTierRepository implements CloudTierRepository {
       sourceTierId: topic.sourceTierId,
       sourceTemplateId: topic.sourceTemplateId,
       isLanguageNeutral: topic.isLanguageNeutral,
+      moderationStatus: response['moderationStatus'] as String? ?? 'approved',
+      reportCount: response['reportCount'] as int? ?? 0,
+      isPublic: topic.isPublic,
     );
+  }
+
+  @override
+  Future<void> setTopicPublic(String topicId, {required bool isPublic}) =>
+      _topics.doc(topicId).update({
+        'isPublic': isPublic,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+
+  @override
+  Future<void> deleteTopic(String topicId) async {
+    await _functions.httpsCallable('deleteTierTopic').call<void>({
+      'topicId': topicId,
+    });
   }
 
   @override
@@ -315,5 +358,22 @@ class FirebaseTierRepository implements CloudTierRepository {
       'reason': 'user_report',
       'createdAt': FieldValue.serverTimestamp(),
     });
+  }
+
+  @override
+  Future<bool> reportTopic(String topicId, {required String reason}) async {
+    final callable = _functions.httpsCallable('reportContent');
+    try {
+      await callable.call<Map<String, dynamic>>({
+        'topicId': topicId,
+        'targetType': 'topic',
+        'targetId': topicId,
+        'reason': reason,
+      });
+      return true;
+    } on FirebaseFunctionsException catch (error) {
+      if (error.code == 'already-exists') return false;
+      rethrow;
+    }
   }
 }

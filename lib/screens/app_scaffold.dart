@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../l10n/app_localizations.dart';
 import '../theme/app_theme.dart';
 import '../utils/app_breakpoints.dart';
+import '../widgets/adsense_ad.dart';
 import '../widgets/common_widgets.dart';
 
 class AppScaffold extends StatelessWidget {
@@ -161,7 +162,10 @@ class _DesktopPortalScaffold extends StatelessWidget {
                       child: _DesktopPortal(
                         index: index,
                         onSelected: onSelected,
-                        body: body,
+                        body: MiddleMouseAutoScroll(
+                          controller: scrollController,
+                          child: body,
+                        ),
                       ),
                     ),
                     if (showAds) ...[
@@ -524,6 +528,16 @@ class _DesktopAdSlot extends StatelessWidget {
   const _DesktopAdSlot({required this.side});
   final _AdSide side;
 
+  static const _fallbackSlot = String.fromEnvironment('ADSENSE_SLOT');
+  static const _leftSlot = String.fromEnvironment(
+    'ADSENSE_LEFT_SLOT',
+    defaultValue: _fallbackSlot,
+  );
+  static const _rightSlot = String.fromEnvironment(
+    'ADSENSE_RIGHT_SLOT',
+    defaultValue: _fallbackSlot,
+  );
+
   @override
   Widget build(BuildContext context) => LayoutBuilder(
     builder: (context, constraints) {
@@ -548,55 +562,61 @@ class _DesktopAdSlot extends StatelessWidget {
               borderRadius: BorderRadius.circular(8),
               border: Border.all(color: AppColors.outline),
             ),
-            child: Column(
+            child: Stack(
+              fit: StackFit.expand,
               children: [
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.symmetric(vertical: 5),
-                  color: Colors.black.withValues(alpha: .22),
-                  alignment: Alignment.center,
-                  child: Text(
-                    context.l10n.t('ad'),
-                    style: const TextStyle(
-                      fontSize: 9,
-                      color: Color(0xFF8C8C98),
+                Column(
+                  children: [
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(vertical: 5),
+                      color: Colors.black.withValues(alpha: .22),
+                      alignment: Alignment.center,
+                      child: Text(
+                        context.l10n.t('ad'),
+                        style: const TextStyle(
+                          fontSize: 9,
+                          color: Color(0xFF8C8C98),
+                        ),
+                      ),
                     ),
-                  ),
+                    const Spacer(),
+                    Container(
+                      width: 72,
+                      height: 72,
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: .06),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(
+                        Icons.campaign_outlined,
+                        size: 34,
+                        color: Color(0xFF777784),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      context.l10n.t('adSpace'),
+                      style: const TextStyle(
+                        color: Color(0xFFB5B5C0),
+                        fontWeight: FontWeight.w800,
+                        fontSize: 12,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    const Text(
+                      'WIDE SKYSCRAPER',
+                      style: TextStyle(
+                        color: Color(0xFF70707C),
+                        fontSize: 9,
+                        letterSpacing: 1.2,
+                      ),
+                    ),
+                    const Spacer(),
+                  ],
                 ),
-                const Spacer(),
-                Container(
-                  width: 72,
-                  height: 72,
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: .06),
-                    shape: BoxShape.circle,
-                  ),
-                  child: const Icon(
-                    Icons.campaign_outlined,
-                    size: 34,
-                    color: Color(0xFF777784),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                Text(
-                  context.l10n.t('adSpace'),
-                  style: const TextStyle(
-                    color: Color(0xFFB5B5C0),
-                    fontWeight: FontWeight.w800,
-                    fontSize: 12,
-                  ),
-                ),
-                const SizedBox(height: 6),
-                const Text(
-                  'WIDE SKYSCRAPER',
-                  style: TextStyle(
-                    color: Color(0xFF70707C),
-                    fontSize: 9,
-                    letterSpacing: 1.2,
-                  ),
-                ),
-                const Spacer(),
+                AdSenseAd(slot: side == _AdSide.left ? _leftSlot : _rightSlot),
               ],
             ),
           ),

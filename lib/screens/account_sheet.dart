@@ -47,9 +47,8 @@ class _AccountSheetBodyState extends State<_AccountSheetBody> {
     AuthResultStatus.credentialInUse => context.l10n.t(
       'authErrorCredentialInUse',
     ),
-    AuthResultStatus.generic || AuthResultStatus.success => context.l10n.t(
-      'authErrorGeneric',
-    ),
+    AuthResultStatus.generic ||
+    AuthResultStatus.success => context.l10n.t('authErrorGeneric'),
   };
 
   Future<void> _submit() async {
@@ -151,9 +150,7 @@ class _AccountSheetBodyState extends State<_AccountSheetBody> {
             autofillHints: [
               _isSignUp ? AutofillHints.newPassword : AutofillHints.password,
             ],
-            decoration: InputDecoration(
-              labelText: context.l10n.t('password'),
-            ),
+            decoration: InputDecoration(labelText: context.l10n.t('password')),
             validator: (value) => (value?.length ?? 0) < 6
                 ? context.l10n.t('authErrorWeakPassword')
                 : null,
@@ -180,9 +177,7 @@ class _AccountSheetBodyState extends State<_AccountSheetBody> {
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
                   : Text(
-                      context.l10n.t(
-                        _isSignUp ? 'createAccount' : 'signIn',
-                      ),
+                      context.l10n.t(_isSignUp ? 'createAccount' : 'signIn'),
                     ),
             ),
           ),

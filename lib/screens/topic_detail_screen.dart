@@ -7,6 +7,7 @@ import '../theme/app_theme.dart';
 import '../widgets/common_widgets.dart';
 import '../widgets/tier_widgets.dart';
 import 'tier_builder_screen.dart';
+import 'user_tier_view_screen.dart';
 
 class TopicDetailScreen extends StatefulWidget {
   const TopicDetailScreen({
@@ -26,6 +27,7 @@ class TopicDetailScreen extends StatefulWidget {
 
 class _TopicDetailScreenState extends State<TopicDetailScreen> {
   final _talkController = TextEditingController();
+  final _scrollController = ScrollController();
   @override
   void initState() {
     super.initState();
@@ -35,6 +37,7 @@ class _TopicDetailScreenState extends State<TopicDetailScreen> {
   @override
   void dispose() {
     _talkController.dispose();
+    _scrollController.dispose();
     super.dispose();
   }
 
@@ -94,6 +97,7 @@ class _TopicDetailScreenState extends State<TopicDetailScreen> {
   }
 
   Widget _talkBoard({int? previewLimit}) => _TalkBoard(
+    appState: widget.appState,
     topic: widget.topic,
     posts: widget.appState.talksFor(widget.topic),
     previewLimit: previewLimit,
@@ -130,7 +134,7 @@ class _TopicDetailScreenState extends State<TopicDetailScreen> {
       );
     },
     onReport: _reportTalk,
-    onPost: () async {
+    onPost: ({required attachOwnTier}) async {
       final text = _talkController.text.trim();
       if (text.isEmpty) return;
       _talkController.clear();
@@ -138,141 +142,192 @@ class _TopicDetailScreenState extends State<TopicDetailScreen> {
         widget.topic.id,
         body: text,
         rank: TierRank.b,
+        attachOwnTier: attachOwnTier,
       );
     },
   );
+
+  Future<void> _reportTopic() async {
+    if (widget.appState.isTopicReported(widget.topic.id)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(context.l10n.t('topicReportAlreadySubmitted'))),
+      );
+      return;
+    }
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(context.l10n.t('topicReportConfirmTitle')),
+        content: Text(context.l10n.t('topicReportConfirmBody')),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: Text(context.l10n.t('cancel')),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: Text(context.l10n.t('topicReport')),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    final submitted = await widget.appState.reportTopic(widget.topic.id);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          context.l10n.t(
+            submitted ? 'topicReportSubmitted' : 'topicReportAlreadySubmitted',
+          ),
+        ),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(
       title: Text(context.l10n.t(widget.initialTab == 1 ? 'talk' : 'topic')),
+      actions: [
+        IconButton(
+          tooltip: context.l10n.t('topicReport'),
+          icon: const Icon(Icons.flag_outlined),
+          onPressed: _reportTopic,
+        ),
+      ],
     ),
-    body: AnimatedBuilder(
-      animation: widget.appState,
-      builder: (context, _) {
-        final currentTopic = widget.appState.topics.firstWhere(
-          (topic) => topic.id == widget.topic.id,
-          orElse: () => widget.topic,
-        );
-        final placements = widget.appState.placementsFor(widget.topic.id);
-        final placed = placements.values.fold(
-          0,
-          (total, items) => total + items.length,
-        );
-        if (widget.initialTab == 1) {
-          return SingleChildScrollView(
-            child: ContentFrame(maxWidth: 840, child: _talkBoard()),
+    body: MiddleMouseAutoScroll(
+      controller: _scrollController,
+      child: AnimatedBuilder(
+        animation: widget.appState,
+        builder: (context, _) {
+          final currentTopic = widget.appState.topics.firstWhere(
+            (topic) => topic.id == widget.topic.id,
+            orElse: () => widget.topic,
           );
-        }
-        return SingleChildScrollView(
-          child: ContentFrame(
-            maxWidth: 840,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    if (currentTopic.faceItem != null)
-                      TierItemCard(item: currentTopic.faceItem!, size: 84),
-                    const SizedBox(width: 16),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            widget.topic.category,
-                            style: const TextStyle(
-                              color: AppColors.purple,
-                              fontSize: 12,
-                              fontWeight: FontWeight.w900,
+          final placements = widget.appState.placementsFor(widget.topic.id);
+          final placed = placements.values.fold(
+            0,
+            (total, items) => total + items.length,
+          );
+          if (widget.initialTab == 1) {
+            return SingleChildScrollView(
+              controller: _scrollController,
+              child: ContentFrame(maxWidth: 840, child: _talkBoard()),
+            );
+          }
+          return SingleChildScrollView(
+            controller: _scrollController,
+            child: ContentFrame(
+              maxWidth: 840,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (currentTopic.faceItem != null)
+                        TierItemCard(item: currentTopic.faceItem!, size: 84),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              widget.topic.category,
+                              style: const TextStyle(
+                                color: AppColors.purple,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w900,
+                              ),
                             ),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            widget.topic.title,
-                            style: Theme.of(context).textTheme.headlineSmall
-                                ?.copyWith(fontWeight: FontWeight.w900),
-                          ),
-                          const SizedBox(height: 7),
-                          Text(
-                            context.l10n.format('participantsItems', {
-                              'participants': widget.topic.participants,
-                              'items': widget.topic.items.length,
-                              'creator': widget.topic.creatorName,
-                            }),
-                            style: TextStyle(
-                              color: Theme.of(
-                                context,
-                              ).colorScheme.onSurfaceVariant,
-                              fontSize: 12,
+                            const SizedBox(height: 4),
+                            Text(
+                              widget.topic.title,
+                              style: Theme.of(context).textTheme.headlineSmall
+                                  ?.copyWith(fontWeight: FontWeight.w900),
                             ),
-                          ),
-                        ],
+                            const SizedBox(height: 7),
+                            Text(
+                              context.l10n.format('participantsItems', {
+                                'participants': widget.topic.participants,
+                                'items': widget.topic.items.length,
+                                'creator': widget.topic.creatorName,
+                              }),
+                              style: TextStyle(
+                                color: Theme.of(
+                                  context,
+                                ).colorScheme.onSurfaceVariant,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-                Text(
-                  widget.topic.description,
-                  style: const TextStyle(height: 1.6),
-                ),
-                const SizedBox(height: 11),
-                Wrap(
-                  spacing: 7,
-                  runSpacing: 7,
-                  children: [
-                    ActionChip(
-                      avatar: Icon(
-                        widget.appState.isTopicLiked(widget.topic.id)
-                            ? Icons.favorite_rounded
-                            : Icons.favorite_border_rounded,
-                        color: widget.appState.isTopicLiked(widget.topic.id)
-                            ? const Color(0xFFFF7186)
-                            : null,
-                        size: 18,
-                      ),
-                      label: Text(
-                        context.l10n.format('likeCount', {
-                          'count': currentTopic.likeCount,
-                        }),
-                      ),
-                      onPressed: () =>
-                          widget.appState.toggleTopicLike(widget.topic.id),
-                    ),
-                    for (final tag in widget.topic.tags)
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    context.l10n.topicDescription(widget.topic.description),
+                    style: const TextStyle(height: 1.6),
+                  ),
+                  const SizedBox(height: 11),
+                  Wrap(
+                    spacing: 7,
+                    runSpacing: 7,
+                    children: [
                       ActionChip(
-                        label: Text('#$tag'),
-                        onPressed: () {
-                          widget.onTagTap(tag);
-                          Navigator.of(context).pop();
-                        },
+                        avatar: Icon(
+                          widget.appState.isTopicLiked(widget.topic.id)
+                              ? Icons.favorite_rounded
+                              : Icons.favorite_border_rounded,
+                          color: widget.appState.isTopicLiked(widget.topic.id)
+                              ? const Color(0xFFFF7186)
+                              : null,
+                          size: 18,
+                        ),
+                        label: Text(
+                          context.l10n.format('likeCount', {
+                            'count': currentTopic.likeCount,
+                          }),
+                        ),
+                        onPressed: () =>
+                            widget.appState.toggleTopicLike(widget.topic.id),
                       ),
-                  ],
-                ),
-                const SizedBox(height: 24),
-                _CommunityBoard(topic: currentTopic),
-                const SizedBox(height: 18),
-                PrimaryButton(
-                  label: placed == 0
-                      ? context.l10n.t('makeMine')
-                      : placed == widget.topic.items.length
-                      ? context.l10n.t('editMyTier')
-                      : context.l10n.format('continueTier', {
-                          'placed': placed,
-                          'total': widget.topic.items.length,
-                        }),
-                  icon: Icons.dashboard_customize_rounded,
-                  onPressed: _buildTier,
-                ),
-                const SizedBox(height: 32),
-                _talkBoard(previewLimit: 3),
-              ],
+                      for (final tag in widget.topic.tags)
+                        ActionChip(
+                          label: Text('#$tag'),
+                          onPressed: () {
+                            widget.onTagTap(tag);
+                            Navigator.of(context).pop();
+                          },
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 24),
+                  _CommunityBoard(topic: currentTopic),
+                  const SizedBox(height: 18),
+                  PrimaryButton(
+                    label: placed == 0
+                        ? context.l10n.t('makeMine')
+                        : placed == widget.topic.items.length
+                        ? context.l10n.t('editMyTier')
+                        : context.l10n.format('continueTier', {
+                            'placed': placed,
+                            'total': widget.topic.items.length,
+                          }),
+                    icon: Icons.dashboard_customize_rounded,
+                    onPressed: _buildTier,
+                  ),
+                  const SizedBox(height: 32),
+                  _talkBoard(previewLimit: 3),
+                ],
+              ),
             ),
-          ),
-        );
-      },
+          );
+        },
+      ),
     ),
   );
 }
@@ -340,6 +395,7 @@ class _CommunityBoard extends StatelessWidget {
 
 class _TalkBoard extends StatefulWidget {
   const _TalkBoard({
+    required this.appState,
     required this.topic,
     required this.posts,
     required this.controller,
@@ -350,10 +406,11 @@ class _TalkBoard extends StatefulWidget {
     this.previewLimit,
     this.onShowAll,
   });
+  final AppState appState;
   final TierTopic topic;
   final List<TalkPost> posts;
   final TextEditingController controller;
-  final Future<void> Function() onPost;
+  final Future<void> Function({required bool attachOwnTier}) onPost;
   final Future<void> Function(
     TalkPost post,
     String? parentReplyId,
@@ -374,6 +431,42 @@ class _TalkBoard extends StatefulWidget {
 class _TalkBoardState extends State<_TalkBoard> {
   String? _replyingToId;
   final Set<String> _expandedPostIds = {};
+  bool _attachOwnTier = false;
+
+  Future<void> _toggleAttachOwnTier(bool value) async {
+    if (value && !widget.appState.hasSubmitted(widget.topic.id)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(context.l10n.t('attachOwnTierUnavailable'))),
+      );
+      return;
+    }
+    setState(() => _attachOwnTier = value);
+  }
+
+  Future<void> _openAuthorTier(TalkPost post) async {
+    final userId = post.authorUserId;
+    if (userId == null) return;
+    final submission = await widget.appState.loadUserSubmission(
+      widget.topic.id,
+      userId,
+    );
+    if (!mounted) return;
+    if (submission == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(context.l10n.t('authorTierUnavailable'))),
+      );
+      return;
+    }
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => UserTierViewScreen(
+          topic: widget.topic,
+          submission: submission,
+          authorName: post.author,
+        ),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -401,11 +494,25 @@ class _TalkBoardState extends State<_TalkBoard> {
                     hintText: context.l10n.t('commentHint'),
                   ),
                 ),
+                CheckboxListTile(
+                  value: _attachOwnTier,
+                  onChanged: (value) => _toggleAttachOwnTier(value ?? false),
+                  contentPadding: EdgeInsets.zero,
+                  controlAffinity: ListTileControlAffinity.leading,
+                  dense: true,
+                  title: Text(
+                    context.l10n.t('attachOwnTier'),
+                    style: const TextStyle(fontSize: 13),
+                  ),
+                ),
                 const SizedBox(height: 9),
                 Align(
                   alignment: Alignment.centerRight,
                   child: FilledButton.icon(
-                    onPressed: widget.onPost,
+                    onPressed: () async {
+                      await widget.onPost(attachOwnTier: _attachOwnTier);
+                      if (mounted) setState(() => _attachOwnTier = false);
+                    },
                     icon: const Icon(Icons.send_rounded, size: 17),
                     label: Text(context.l10n.t('post')),
                   ),
@@ -434,13 +541,17 @@ class _TalkBoardState extends State<_TalkBoard> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       CircleAvatar(
-                        radius: 18,
+                        radius: 20,
                         backgroundColor: Theme.of(
                           context,
-                        ).colorScheme.surfaceContainerHigh,
-                        child: Text(post.author.characters.first),
+                        ).colorScheme.primary.withValues(alpha: .18),
+                        foregroundColor: Theme.of(context).colorScheme.primary,
+                        child: Text(
+                          post.author.characters.first,
+                          style: const TextStyle(fontWeight: FontWeight.w900),
+                        ),
                       ),
-                      const SizedBox(width: 11),
+                      const SizedBox(width: 13),
                       Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
@@ -452,7 +563,7 @@ class _TalkBoardState extends State<_TalkBoard> {
                                     post.author,
                                     style: const TextStyle(
                                       fontWeight: FontWeight.w900,
-                                      fontSize: 12,
+                                      fontSize: 15,
                                     ),
                                   ),
                                 ),
@@ -461,32 +572,45 @@ class _TalkBoardState extends State<_TalkBoard> {
                             const SizedBox(height: 6),
                             Text(
                               post.body,
-                              style: const TextStyle(height: 1.5),
+                              style: const TextStyle(
+                                fontSize: 16,
+                                height: 1.55,
+                              ),
                             ),
-                            const SizedBox(height: 6),
+                            const SizedBox(height: 10),
+                            Text(
+                              post.displayMinutesAgo == 0
+                                  ? context.l10n.t('justNow')
+                                  : context.l10n.format('minutesAgo', {
+                                      'count': post.displayMinutesAgo,
+                                    }),
+                              style: TextStyle(
+                                color: Theme.of(
+                                  context,
+                                ).colorScheme.onSurfaceVariant,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
                             Wrap(
                               crossAxisAlignment: WrapCrossAlignment.center,
-                              spacing: 2,
-                              runSpacing: 0,
+                              spacing: 8,
+                              runSpacing: 8,
                               children: [
-                                Text(
-                                  post.displayMinutesAgo == 0
-                                      ? context.l10n.t('justNow')
-                                      : context.l10n.format('minutesAgo', {
-                                          'count': post.displayMinutesAgo,
-                                        }),
-                                  style: TextStyle(
-                                    color: Theme.of(
-                                      context,
-                                    ).colorScheme.onSurfaceVariant,
-                                    fontSize: 10,
+                                if (post.attachedTier &&
+                                    post.authorUserId != null)
+                                  _CommentActionButton(
+                                    onPressed: () => _openAuthorTier(post),
+                                    icon: Icons.leaderboard_outlined,
+                                    label: context.l10n.t('viewAuthorTier'),
+                                    emphasized: true,
                                   ),
-                                ),
-                                const SizedBox(width: 8),
                                 _ReactionButton(
                                   label: context.l10n.format('reactionLike', {
                                     'count': post.upvotes,
                                   }),
+                                  accent: const Color(0xFFFFC857),
                                   onTap: post.id == null
                                       ? null
                                       : () => widget.onReact(post, null, true),
@@ -495,11 +619,12 @@ class _TalkBoardState extends State<_TalkBoard> {
                                   label: context.l10n.format('reactionHmm', {
                                     'count': post.downvotes,
                                   }),
+                                  accent: const Color(0xFFB09CFF),
                                   onTap: post.id == null
                                       ? null
                                       : () => widget.onReact(post, null, false),
                                 ),
-                                TextButton.icon(
+                                _CommentActionButton(
                                   onPressed: post.id == null
                                       ? null
                                       : () => setState(() {
@@ -508,29 +633,17 @@ class _TalkBoardState extends State<_TalkBoard> {
                                               ? null
                                               : post.id;
                                         }),
-                                  icon: const Icon(
-                                    Icons.reply_rounded,
-                                    size: 15,
-                                  ),
-                                  label: Text(context.l10n.t('reply')),
-                                  style: TextButton.styleFrom(
-                                    visualDensity: VisualDensity.compact,
-                                    textStyle: const TextStyle(fontSize: 11),
-                                  ),
+                                  icon: Icons.reply_rounded,
+                                  label: context.l10n.t('reply'),
+                                  emphasized: true,
                                 ),
-                                TextButton.icon(
+                                _CommentActionButton(
                                   onPressed: post.id == null
                                       ? null
                                       : () => widget.onReport(post, null),
-                                  icon: const Icon(
-                                    Icons.flag_outlined,
-                                    size: 14,
-                                  ),
-                                  label: Text(context.l10n.t('reportComment')),
-                                  style: TextButton.styleFrom(
-                                    visualDensity: VisualDensity.compact,
-                                    textStyle: const TextStyle(fontSize: 10),
-                                  ),
+                                  icon: Icons.flag_outlined,
+                                  label: context.l10n.t('reportComment'),
+                                  accent: const Color(0xFFFF7180),
                                 ),
                               ],
                             ),
@@ -824,43 +937,40 @@ class _ReplyCardState extends State<_ReplyCard> {
             ],
           ),
           const SizedBox(height: 5),
-          Text(reply.body, style: const TextStyle(fontSize: 12, height: 1.45)),
-          const SizedBox(height: 5),
+          Text(reply.body, style: const TextStyle(fontSize: 14, height: 1.5)),
+          const SizedBox(height: 8),
           Wrap(
             crossAxisAlignment: WrapCrossAlignment.center,
-            spacing: 2,
+            spacing: 7,
+            runSpacing: 7,
             children: [
               _ReactionButton(
                 label: context.l10n.format('reactionLike', {
                   'count': reply.upvotes,
                 }),
+                accent: const Color(0xFFFFC857),
                 onTap: () => widget.onReact(reply.id, true),
               ),
               _ReactionButton(
                 label: context.l10n.format('reactionHmm', {
                   'count': reply.downvotes,
                 }),
+                accent: const Color(0xFFB09CFF),
                 onTap: () => widget.onReact(reply.id, false),
               ),
-              TextButton.icon(
+              _CommentActionButton(
                 onPressed: () => setState(() {
                   _showComposer = !_showComposer;
                 }),
-                icon: const Icon(Icons.reply_rounded, size: 14),
-                label: Text(context.l10n.t('reply')),
-                style: TextButton.styleFrom(
-                  visualDensity: VisualDensity.compact,
-                  textStyle: const TextStyle(fontSize: 10),
-                ),
+                icon: Icons.reply_rounded,
+                label: context.l10n.t('reply'),
+                emphasized: true,
               ),
-              TextButton.icon(
+              _CommentActionButton(
                 onPressed: () => widget.onReport(reply.id),
-                icon: const Icon(Icons.flag_outlined, size: 13),
-                label: Text(context.l10n.t('reportComment')),
-                style: TextButton.styleFrom(
-                  visualDensity: VisualDensity.compact,
-                  textStyle: const TextStyle(fontSize: 10),
-                ),
+                icon: Icons.flag_outlined,
+                label: context.l10n.t('reportComment'),
+                accent: const Color(0xFFFF7180),
               ),
             ],
           ),
@@ -911,20 +1021,74 @@ class _ReplyCardState extends State<_ReplyCard> {
 }
 
 class _ReactionButton extends StatelessWidget {
-  const _ReactionButton({required this.label, required this.onTap});
+  const _ReactionButton({
+    required this.label,
+    required this.onTap,
+    required this.accent,
+  });
 
   final String label;
   final VoidCallback? onTap;
+  final Color accent;
 
   @override
-  Widget build(BuildContext context) => TextButton(
-    onPressed: onTap,
-    style: TextButton.styleFrom(
-      visualDensity: VisualDensity.compact,
-      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-      minimumSize: const Size(0, 30),
-      textStyle: const TextStyle(fontSize: 10, fontWeight: FontWeight.w800),
-    ),
-    child: Text(label, softWrap: false),
-  );
+  Widget build(BuildContext context) {
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    final foreground = dark ? accent : Color.lerp(accent, Colors.black, .5)!;
+    return OutlinedButton(
+      onPressed: onTap,
+      style: OutlinedButton.styleFrom(
+        backgroundColor: accent.withValues(alpha: dark ? .16 : .12),
+        foregroundColor: foreground,
+        side: BorderSide(color: accent.withValues(alpha: .62)),
+        shape: const StadiumBorder(),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+        minimumSize: const Size(0, 40),
+        textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w900),
+      ),
+      child: Text(label, softWrap: false),
+    );
+  }
+}
+
+class _CommentActionButton extends StatelessWidget {
+  const _CommentActionButton({
+    required this.onPressed,
+    required this.icon,
+    required this.label,
+    this.emphasized = false,
+    this.accent,
+  });
+
+  final VoidCallback? onPressed;
+  final IconData icon;
+  final String label;
+  final bool emphasized;
+  final Color? accent;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final buttonColor = accent ?? scheme.primary;
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    final foreground = dark
+        ? buttonColor
+        : Color.lerp(buttonColor, Colors.black, .48)!;
+    return OutlinedButton.icon(
+      onPressed: onPressed,
+      icon: Icon(icon, size: 17),
+      label: Text(label, softWrap: false),
+      style: OutlinedButton.styleFrom(
+        backgroundColor: buttonColor.withValues(alpha: dark ? .15 : .1),
+        foregroundColor: foreground,
+        side: BorderSide(
+          color: buttonColor.withValues(alpha: emphasized ? .7 : .52),
+        ),
+        shape: const StadiumBorder(),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+        minimumSize: const Size(0, 40),
+        textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w900),
+      ),
+    );
+  }
 }

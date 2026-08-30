@@ -1,28 +1,94 @@
 import 'package:flutter/material.dart';
 
 import '../l10n/app_localizations.dart';
+import '../models/tier_models.dart';
 import '../services/app_state.dart';
 import '../utils/app_breakpoints.dart';
 import '../widgets/common_widgets.dart';
 import '../widgets/tier_widgets.dart';
 
-class MyTierScreen extends StatelessWidget {
+class MyTierScreen extends StatefulWidget {
   const MyTierScreen({
     super.key,
     required this.appState,
     required this.onTagTap,
+    required this.onEdit,
     this.scrollController,
   });
   final AppState appState;
   final ValueChanged<String?> onTagTap;
+  final ValueChanged<TierTopic> onEdit;
   final ScrollController? scrollController;
+
+  @override
+  State<MyTierScreen> createState() => _MyTierScreenState();
+}
+
+enum _MyTierSection { created, joined }
+
+class _MyTierScreenState extends State<MyTierScreen> {
+  _MyTierSection _section = _MyTierSection.created;
+
+  Future<void> _deleteTopic(BuildContext context, TierTopic topic) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(context.l10n.t('deleteTierConfirmTitle')),
+        content: Text(context.l10n.t('deleteTierConfirmBody')),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: Text(context.l10n.t('cancel')),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(context).colorScheme.error,
+            ),
+            child: Text(context.l10n.t('delete')),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true) await widget.appState.deleteOwnTopic(topic);
+  }
+
+  Future<void> _makePrivate(BuildContext context, TierTopic topic) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(context.l10n.t('makePrivateConfirmTitle')),
+        content: Text(context.l10n.t('makePrivateConfirmBody')),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: Text(context.l10n.t('cancel')),
+          ),
+          FilledButton.icon(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            icon: const Icon(Icons.visibility_off_outlined),
+            label: Text(context.l10n.t('makePrivate')),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true) {
+      await widget.appState.setTopicPublic(topic, false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
-    animation: appState,
+    animation: widget.appState,
     builder: (context, _) {
-      final topics = appState.startedTopics.toList();
+      final appState = widget.appState;
+      final topics =
+          (_section == _MyTierSection.created
+                  ? appState.createdTopics
+                  : appState.joinedTopics)
+              .toList();
       return SingleChildScrollView(
-        controller: scrollController,
+        controller: widget.scrollController,
         child: ContentFrame(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -40,11 +106,42 @@ class MyTierScreen extends StatelessWidget {
                   color: Theme.of(context).colorScheme.onSurfaceVariant,
                 ),
               ),
+              const SizedBox(height: 18),
+              SizedBox(
+                width: double.infinity,
+                child: SegmentedButton<_MyTierSection>(
+                  segments: [
+                    ButtonSegment(
+                      value: _MyTierSection.created,
+                      icon: const Icon(Icons.edit_note_rounded),
+                      label: Text(context.l10n.t('createdTiers')),
+                    ),
+                    ButtonSegment(
+                      value: _MyTierSection.joined,
+                      icon: const Icon(Icons.how_to_vote_outlined),
+                      label: Text(context.l10n.t('joinedTiers')),
+                    ),
+                  ],
+                  selected: {_section},
+                  onSelectionChanged: (selection) {
+                    setState(() => _section = selection.first);
+                  },
+                  showSelectedIcon: false,
+                ),
+              ),
               const SizedBox(height: 22),
               if (topics.isEmpty)
                 EmptyState(
-                  title: context.l10n.t('noTier'),
-                  message: context.l10n.t('noTierMessage'),
+                  title: context.l10n.t(
+                    _section == _MyTierSection.created
+                        ? 'noCreatedTier'
+                        : 'noJoinedTier',
+                  ),
+                  message: context.l10n.t(
+                    _section == _MyTierSection.created
+                        ? 'noCreatedTierMessage'
+                        : 'noJoinedTierMessage',
+                  ),
                   icon: Icons.view_agenda_outlined,
                 )
               else
@@ -67,6 +164,85 @@ class MyTierScreen extends StatelessWidget {
                               topic: topic,
                               liked: appState.isTopicLiked(topic.id),
                               onLike: () => appState.toggleTopicLike(topic.id),
+                              managementAction:
+                                  _section == _MyTierSection.created
+                                  ? Wrap(
+                                      spacing: 7,
+                                      runSpacing: 7,
+                                      children: [
+                                        if (!topic.isPublic)
+                                          Container(
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 9,
+                                              vertical: 5,
+                                            ),
+                                            decoration: BoxDecoration(
+                                              color: Theme.of(context)
+                                                  .colorScheme
+                                                  .surfaceContainerHigh,
+                                              borderRadius:
+                                                  BorderRadius.circular(99),
+                                            ),
+                                            child: Text(
+                                              context.l10n.t('privateTier'),
+                                              style: const TextStyle(
+                                                fontSize: 11,
+                                                fontWeight: FontWeight.w900,
+                                              ),
+                                            ),
+                                          ),
+                                        OutlinedButton.icon(
+                                          onPressed: () => widget.onEdit(topic),
+                                          icon: const Icon(Icons.edit_outlined),
+                                          label: Text(
+                                            context.l10n.t('editTier'),
+                                          ),
+                                        ),
+                                        OutlinedButton.icon(
+                                          onPressed: () => topic.isPublic
+                                              ? _makePrivate(context, topic)
+                                              : appState.setTopicPublic(
+                                                  topic,
+                                                  true,
+                                                ),
+                                          icon: Icon(
+                                            topic.isPublic
+                                                ? Icons.visibility_off_outlined
+                                                : Icons.visibility_outlined,
+                                          ),
+                                          label: Text(
+                                            context.l10n.t(
+                                              topic.isPublic
+                                                  ? 'makePrivate'
+                                                  : 'makePublic',
+                                            ),
+                                          ),
+                                        ),
+                                        OutlinedButton.icon(
+                                          onPressed: () =>
+                                              _deleteTopic(context, topic),
+                                          icon: const Icon(
+                                            Icons.delete_outline_rounded,
+                                          ),
+                                          label: Text(
+                                            context.l10n.t('deleteTier'),
+                                          ),
+                                          style: OutlinedButton.styleFrom(
+                                            foregroundColor: Theme.of(
+                                              context,
+                                            ).colorScheme.error,
+                                            side: BorderSide(
+                                              color: Theme.of(context)
+                                                  .colorScheme
+                                                  .error
+                                                  .withValues(alpha: .55),
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    )
+                                  : null,
+                              showJoinAction: false,
                               progress:
                                   appState
                                       .placementsFor(topic.id)
@@ -78,7 +254,7 @@ class MyTierScreen extends StatelessWidget {
                                   topic.items.length,
                               onTap: () => Navigator.of(context).pushNamed(
                                 '/${appState.locale.code}/tier/${topic.id}',
-                                arguments: onTagTap,
+                                arguments: widget.onTagTap,
                               ),
                             ),
                           ),

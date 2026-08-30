@@ -22,9 +22,11 @@ class CreateScreen extends StatefulWidget {
     super.key,
     required this.appState,
     this.scrollController,
+    this.initialTopic,
   });
   final AppState appState;
   final ScrollController? scrollController;
+  final TierTopic? initialTopic;
   @override
   State<CreateScreen> createState() => _CreateScreenState();
 }
@@ -37,7 +39,7 @@ class _CreateScreenState extends State<CreateScreen> {
   final List<TierItem> _items = [];
   final _imageProcessing = const ImageProcessingService();
   final _googleImageSearch = const GoogleImageSearchService();
-  String _category = 'other';
+  String? _category;
   bool _picking = false;
   bool _draggingImages = false;
   bool _searchingImages = false;
@@ -47,6 +49,39 @@ class _CreateScreenState extends State<CreateScreen> {
   String _existingQuery = '';
   String? _sourceTierId;
   String? _sourceTemplateId;
+
+  @override
+  void initState() {
+    super.initState();
+    final topic = widget.initialTopic;
+    if (topic != null) _loadEditableTopic(topic);
+  }
+
+  void _loadEditableTopic(TierTopic topic) {
+    _title.text = topic.title;
+    _tags.text = topic.tags.join(', ');
+    _description.text = AppLocalizations.isDefaultDescription(topic.description)
+        ? ''
+        : topic.description;
+    _category = topic.categoryId;
+    _sourceTierId = topic.sourceTierId;
+    _sourceTemplateId = topic.sourceTemplateId;
+    _items
+      ..clear()
+      ..addAll([
+        for (final item in topic.items)
+          TierItem(
+            id: item.id,
+            topicId: topic.id,
+            sortIndex: item.sortIndex,
+            name: item.name,
+            imageUrl: item.imageUrl,
+            colorSeed: item.colorSeed,
+            contentLanguage: item.contentLanguage,
+            isLanguageNeutral: item.isLanguageNeutral,
+          ),
+      ]);
+  }
 
   void _showErrorSnackBar(String message) {
     final colors = Theme.of(context).colorScheme;
@@ -553,17 +588,21 @@ class _CreateScreenState extends State<CreateScreen> {
 
   Future<void> _continue() async {
     final title = _title.text.trim();
-    if (title.isEmpty || _items.isEmpty) {
+    if (title.isEmpty || _category == null || _items.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(context.l10n.t('titleCardsRequired'))),
+        SnackBar(content: Text(context.l10n.t('titleCategoryCardsRequired'))),
       );
       return;
     }
-    final id = 'local-${DateTime.now().millisecondsSinceEpoch}';
+    final editingTopic = widget.initialTopic;
+    final id =
+        editingTopic?.id ?? 'local-${DateTime.now().millisecondsSinceEpoch}';
     final items = [
       for (var i = 0; i < _items.length; i++)
         TierItem(
-          id: '$id-$i',
+          id: editingTopic != null && !_items[i].id.startsWith('draft-')
+              ? _items[i].id
+              : '$id-$i-${DateTime.now().microsecondsSinceEpoch}',
           topicId: id,
           sortIndex: i,
           name: _items[i].name,
@@ -576,21 +615,22 @@ class _CreateScreenState extends State<CreateScreen> {
     final topic = TierTopic(
       id: id,
       title: title,
-      description: _description.text.trim().isEmpty
-          ? context.l10n.t('defaultDescription')
-          : _description.text.trim(),
+      description: _description.text.trim(),
       tags: _tags.text
           .split(RegExp(r'[,、\s#]+'))
           .where((tag) => tag.isNotEmpty)
           .toList(),
-      category: context.l10n.categoryName(_category),
-      categoryId: _category,
+      category: context.l10n.categoryName(_category!),
+      categoryId: _category!,
       creatorName: widget.appState.currentUserName,
-      participants: 1,
+      creatorId: editingTopic?.creatorId,
+      participants: editingTopic?.participants ?? 1,
       items: items,
       community: {
         for (var i = 0; i < items.length; i++)
-          items[i].id: TierRank.values[i % TierRank.values.length],
+          items[i].id:
+              editingTopic?.community[items[i].id] ??
+              TierRank.values[i % TierRank.values.length],
       },
       createdDaysAgo: 0,
       contentLanguage: widget.appState.locale,
@@ -598,6 +638,8 @@ class _CreateScreenState extends State<CreateScreen> {
       sourceTierId: _sourceTierId,
       sourceTemplateId: _sourceTemplateId,
       isLanguageNeutral: items.every((item) => item.isLanguageNeutral),
+      likeCount: editingTopic?.likeCount ?? 0,
+      isPublic: editingTopic?.isPublic ?? true,
     );
     if (!mounted) return;
     Navigator.of(context).push(
@@ -627,7 +669,9 @@ class _CreateScreenState extends State<CreateScreen> {
   void _startExistingTier(TierTopic topic) {
     _title.text = topic.title;
     _tags.text = topic.tags.join(', ');
-    _description.text = topic.description;
+    _description.text = AppLocalizations.isDefaultDescription(topic.description)
+        ? ''
+        : topic.description;
     setState(() {
       _category = topic.categoryId;
       _sourceTierId = topic.id;
@@ -995,10 +1039,29 @@ class _CreateScreenState extends State<CreateScreen> {
             ),
           ),
           const SizedBox(height: 17),
+          Text(
+            context.l10n.t('categoryStep'),
+            style: const TextStyle(fontWeight: FontWeight.w900),
+          ),
+          const SizedBox(height: 8),
+          DropdownButtonFormField<String>(
+            key: ValueKey('category-$_category'),
+            initialValue: _category,
+            hint: Text(context.l10n.t('categorySelect')),
+            items: [
+              for (final value in TierCategory.ids)
+                DropdownMenuItem(
+                  value: value,
+                  child: Text(context.l10n.categoryName(value)),
+                ),
+            ],
+            onChanged: (value) => setState(() => _category = value),
+          ),
+          const SizedBox(height: 10),
           ExpansionTile(
             tilePadding: EdgeInsets.zero,
             title: Text(
-              context.l10n.t('detailsOptional'),
+              context.l10n.t('descriptionOptional'),
               style: const TextStyle(fontWeight: FontWeight.w900),
             ),
             children: [
@@ -1008,20 +1071,6 @@ class _CreateScreenState extends State<CreateScreen> {
                 decoration: InputDecoration(
                   hintText: context.l10n.t('descriptionHint'),
                 ),
-              ),
-              const SizedBox(height: 9),
-              DropdownButtonFormField<String>(
-                key: ValueKey('category-$_category'),
-                initialValue: _category,
-                items: [
-                  for (final value in TierCategory.ids)
-                    DropdownMenuItem(
-                      value: value,
-                      child: Text(context.l10n.categoryName(value)),
-                    ),
-                ],
-                onChanged: (value) =>
-                    setState(() => _category = value ?? 'other'),
               ),
             ],
           ),

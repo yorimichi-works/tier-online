@@ -9,6 +9,30 @@ abstract final class AppColors {
   static const cyan = Color(0xFF5AC8D8);
 }
 
+/// Local CJK coverage first, followed by platform fonts for uncommon glyphs.
+///
+/// Both local subsets contain all strings shipped by the app. The Japanese
+/// subset also contains the Joyo Kanji set and the Korean subset contains all
+/// modern Hangul syllables. Platform fallbacks remain available for arbitrary
+/// mixed-language user content and uncommon CJK variants.
+const appFontFamilyFallback = <String>[
+  'TierNotoSansJP',
+  'TierNotoSansKR',
+  'Noto Sans',
+  'Noto Sans JP',
+  'Noto Sans KR',
+  'Yu Gothic',
+  'YuGothic',
+  'Yu Gothic UI',
+  'Hiragino Kaku Gothic ProN',
+  'Meiryo',
+  'Apple SD Gothic Neo',
+  'Malgun Gothic',
+  'Arial',
+  'Helvetica',
+  'sans-serif',
+];
+
 ThemeData buildAppTheme() => buildDarkAppTheme();
 
 ThemeData buildDarkAppTheme() {
@@ -28,7 +52,7 @@ ThemeData buildDarkAppTheme() {
     useMaterial3: true,
     colorScheme: scheme,
     scaffoldBackgroundColor: AppColors.background,
-    fontFamilyFallback: const ['Noto Sans JP', 'Yu Gothic UI', 'sans-serif'],
+    fontFamilyFallback: appFontFamilyFallback,
     appBarTheme: const AppBarTheme(
       backgroundColor: AppColors.background,
       elevation: 0,
@@ -92,7 +116,7 @@ ThemeData buildLightAppTheme() {
     brightness: Brightness.light,
     colorScheme: scheme,
     scaffoldBackgroundColor: const Color(0xFFF5F6F9),
-    fontFamilyFallback: const ['Noto Sans JP', 'Yu Gothic UI', 'sans-serif'],
+    fontFamilyFallback: appFontFamilyFallback,
     appBarTheme: const AppBarTheme(
       backgroundColor: Color(0xFFF5F6F9),
       foregroundColor: Color(0xFF1A1B20),

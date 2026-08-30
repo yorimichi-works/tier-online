@@ -106,6 +106,8 @@ class TalkPost {
     this.replies = const [],
     this.upvotes = 0,
     this.downvotes = 0,
+    this.authorUserId,
+    this.attachedTier = false,
   });
   final String? id;
   final String author;
@@ -116,6 +118,11 @@ class TalkPost {
   final List<TalkReply> replies;
   final int upvotes;
   final int downvotes;
+  /// 投稿者の匿名/アカウントID。「自分のtierを載せる」で自分のTier結果に
+  /// リンクするために使う。
+  final String? authorUserId;
+  /// 投稿時に「自分のtierを載せる」がチェックされていたかどうか。
+  final bool attachedTier;
   int get displayMinutesAgo => createdAt == null
       ? minutesAgo
       : DateTime.now().difference(createdAt!).inMinutes.clamp(0, 999999);
@@ -131,6 +138,8 @@ class TalkPost {
         replies: replies ?? this.replies,
         upvotes: upvotes ?? this.upvotes,
         downvotes: downvotes ?? this.downvotes,
+        authorUserId: authorUserId,
+        attachedTier: attachedTier,
       );
 }
 
@@ -195,6 +204,10 @@ class TierTopic {
     this.sourceTierId,
     this.sourceTemplateId,
     this.isLanguageNeutral = false,
+    this.moderationStatus = 'approved',
+    this.reportCount = 0,
+    this.createdByAnonymous = false,
+    this.isPublic = true,
   });
 
   final String id;
@@ -217,6 +230,12 @@ class TierTopic {
   final String? sourceTierId;
   final String? sourceTemplateId;
   final bool isLanguageNeutral;
+
+  /// 'approved' | 'flagged' | 'blocked'
+  final String moderationStatus;
+  final int reportCount;
+  final bool createdByAnonymous;
+  final bool isPublic;
 
   TierItem? get faceItem {
     for (final rank in TierRank.values) {
@@ -243,6 +262,9 @@ class TierTopic {
     String? sourceTierId,
     String? sourceTemplateId,
     bool? isLanguageNeutral,
+    String? moderationStatus,
+    int? reportCount,
+    bool? isPublic,
   }) => TierTopic(
     id: id,
     title: title,
@@ -264,6 +286,10 @@ class TierTopic {
     sourceTierId: sourceTierId ?? this.sourceTierId,
     sourceTemplateId: sourceTemplateId ?? this.sourceTemplateId,
     isLanguageNeutral: isLanguageNeutral ?? this.isLanguageNeutral,
+    moderationStatus: moderationStatus ?? this.moderationStatus,
+    reportCount: reportCount ?? this.reportCount,
+    createdByAnonymous: createdByAnonymous,
+    isPublic: isPublic ?? this.isPublic,
   );
 }
 

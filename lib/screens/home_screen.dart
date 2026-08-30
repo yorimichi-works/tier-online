@@ -27,6 +27,8 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   int _filter = 0;
   String? _category;
+  bool _viewWorldTiers = false;
+  final Set<AppLocale> _languages = {};
   void _open(TierTopic topic) => Navigator.of(context).pushNamed(
     '/${widget.appState.locale.code}/tier/${topic.id}',
     arguments: widget.onExplore,
@@ -34,7 +36,19 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final topics = [...widget.appState.topics]
+    if (!_viewWorldTiers) {
+      _languages
+        ..clear()
+        ..add(widget.appState.locale);
+    }
+    final languageTopics = widget.appState.publicTopics
+        .where(
+          (topic) =>
+              topic.isLanguageNeutral ||
+              _languages.contains(topic.contentLanguage),
+        )
+        .toList();
+    final topics = [...languageTopics]
       ..sort((a, b) => _localePriority(b).compareTo(_localePriority(a)));
     if (_filter == 0) {
       topics.sort((a, b) => b.likeCount.compareTo(a.likeCount));
@@ -51,7 +65,7 @@ class _HomeScreenState extends State<HomeScreen> {
         ? topics
         : topics.where((topic) => topic.categoryId == _category).toList();
     final categories = {
-      for (final topic in widget.appState.topics) topic.categoryId,
+      for (final topic in languageTopics) topic.categoryId,
     }.toList();
     return SingleChildScrollView(
       controller: widget.scrollController,
@@ -169,6 +183,24 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                 ],
               ),
+            ),
+            const SizedBox(height: 13),
+            WorldLanguageFilter(
+              enabled: _viewWorldTiers,
+              selected: _languages,
+              onEnabledChanged: (value) => setState(() {
+                _viewWorldTiers = value;
+                if (_languages.isEmpty) {
+                  _languages.add(widget.appState.locale);
+                }
+              }),
+              onLanguageChanged: (locale, selected) => setState(() {
+                if (selected) {
+                  _languages.add(locale);
+                } else {
+                  _languages.remove(locale);
+                }
+              }),
             ),
             const SizedBox(height: 26),
             SectionHeader(

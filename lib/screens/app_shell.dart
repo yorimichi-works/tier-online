@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../models/tier_models.dart';
 import '../services/app_state.dart';
 import 'app_scaffold.dart';
 import 'create_screen.dart';
@@ -19,6 +20,7 @@ class AppShell extends StatefulWidget {
 class _AppShellState extends State<AppShell> {
   late int _index;
   String? _searchTag;
+  TierTopic? _editingTopic;
   final _scrollControllers = List.generate(5, (_) => ScrollController());
 
   @override
@@ -54,12 +56,18 @@ class _AppShellState extends State<AppShell> {
         scrollController: _scrollControllers[1],
       ),
       CreateScreen(
+        key: ValueKey(_editingTopic?.id ?? 'new-tier'),
         appState: widget.appState,
         scrollController: _scrollControllers[2],
+        initialTopic: _editingTopic,
       ),
       MyTierScreen(
         appState: widget.appState,
         onTagTap: _openExplore,
+        onEdit: (topic) => setState(() {
+          _editingTopic = topic;
+          _index = 2;
+        }),
         scrollController: _scrollControllers[3],
       ),
       SettingsScreen(
@@ -69,7 +77,10 @@ class _AppShellState extends State<AppShell> {
     ];
     return AppScaffold(
       index: _index,
-      onSelected: (value) => setState(() => _index = value),
+      onSelected: (value) => setState(() {
+        if (value == 2 && _index != 2) _editingTopic = null;
+        _index = value;
+      }),
       scrollController: _scrollControllers[_index],
       body: IndexedStack(index: _index, children: pages),
     );

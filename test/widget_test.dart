@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:tier_table_online/main.dart';
+import 'package:tier_table_online/l10n/app_localizations.dart';
 import 'package:tier_table_online/models/tier_models.dart';
 import 'package:tier_table_online/repositories/dummy_tier_repository.dart';
 import 'package:tier_table_online/screens/create_screen.dart';
@@ -38,7 +39,10 @@ void main() {
     expect(find.text('ゲーム'), findsOneWidget);
     expect(tester.takeException(), isNull);
 
-    await tester.tap(find.text('最強の妖怪Tier'));
+    final firstTopic = find.text('最強の妖怪Tier');
+    await tester.ensureVisible(firstTopic);
+    await tester.pumpAndSettle();
+    await tester.tap(firstTopic);
     await tester.pumpAndSettle();
     expect(find.text('みんなのTier'), findsWidgets);
     expect(find.text('自分も作る'), findsOneWidget);
@@ -206,7 +210,10 @@ void main() {
       ),
     );
 
-    await tester.tap(find.text('名前でカードを追加'));
+    final addByName = find.text('名前でカードを追加');
+    await tester.ensureVisible(addByName);
+    await tester.pumpAndSettle();
+    await tester.tap(addByName);
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField).last, '苺虫');
     await tester.tap(find.text('まとめて追加'));
@@ -230,7 +237,7 @@ void main() {
   });
 
   testWidgets('作る画面は画像中心の簡略フローを表示する', (tester) async {
-    await tester.binding.setSurfaceSize(const Size(430, 900));
+    await tester.binding.setSurfaceSize(const Size(430, 1200));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     await tester.pumpWidget(
       TierTableOnlineApp(appState: AppState(DummyTierRepository())),
@@ -292,7 +299,10 @@ void main() {
     await appState.initialize();
     await tester.pumpWidget(TierTableOnlineApp(appState: appState));
 
-    await tester.tap(find.text('最強の妖怪Tier'));
+    final topic = find.text('最強の妖怪Tier');
+    await tester.ensureVisible(topic);
+    await tester.pumpAndSettle();
+    await tester.tap(topic);
     await tester.pumpAndSettle();
     await tester.ensureVisible(find.text('語る'));
     await tester.pumpAndSettle();
@@ -332,7 +342,10 @@ void main() {
     await appState.initialize();
     await tester.pumpWidget(TierTableOnlineApp(appState: appState));
 
-    await tester.tap(find.text('最強の妖怪Tier'));
+    final topic = find.text('最強の妖怪Tier');
+    await tester.ensureVisible(topic);
+    await tester.pumpAndSettle();
+    await tester.tap(topic);
     await tester.pumpAndSettle();
     await tester.ensureVisible(find.text('語る'));
     await tester.pumpAndSettle();
@@ -430,6 +443,13 @@ void main() {
     expect(shortName.style!.fontSize, greaterThanOrEqualTo(18));
     expect(shortName.style!.color, Colors.white);
     expect(longName.style!.color, Colors.white);
+
+    final shortSurface = tester.widget<Container>(
+      find.byKey(const ValueKey('tier-item-surface-short')),
+    );
+    final decoration = shortSurface.decoration! as BoxDecoration;
+    expect(decoration.gradient, isA<LinearGradient>());
+    expect(decoration.boxShadow, isNotEmpty);
   });
 
   testWidgets('探すカードの表示アニメーションを設定で無効化できる', (tester) async {
@@ -455,6 +475,46 @@ void main() {
       findsNothing,
     );
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('世界のTierを有効にすると日英韓を複数選択できる', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(430, 1200));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final repository = DummyTierRepository()
+      ..add(
+        const TierTopic(
+          id: 'korean-topic',
+          title: '한국 티어',
+          description: '',
+          tags: ['한국'],
+          category: '게임',
+          categoryId: 'games',
+          creatorName: '테스터',
+          participants: 1,
+          items: [
+            TierItem(
+              id: 'korean-item',
+              topicId: 'korean-topic',
+              sortIndex: 0,
+              name: '카드',
+            ),
+          ],
+          community: {'korean-item': TierRank.s},
+          contentLanguage: AppLocale.ko,
+          targetRegion: 'KR',
+        ),
+      );
+    await tester.pumpWidget(TierTableOnlineApp(appState: AppState(repository)));
+
+    expect(find.text('한국 티어'), findsNothing);
+    await tester.tap(find.text('世界のTierを見る'));
+    await tester.pumpAndSettle();
+    expect(find.text('日本語'), findsOneWidget);
+    expect(find.text('한국어'), findsOneWidget);
+    expect(find.text('English'), findsOneWidget);
+    await tester.tap(find.text('한국어'));
+    await tester.pumpAndSettle();
+    expect(find.text('한국 티어'), findsOneWidget);
   });
 
   testWidgets('結果画面に共有PNG用の描画領域を表示する', (tester) async {

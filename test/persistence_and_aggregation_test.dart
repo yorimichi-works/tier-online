@@ -286,6 +286,21 @@ void main() {
     expect(restored.categoryId, 'games');
     expect(restored.sourceTierId, 'source-tier');
   });
+
+  test('未入力と旧共通説明文は閲覧言語の共通説明文へ切り替わる', () {
+    expect(
+      const AppLocalizations(AppLocale.ja).topicDescription(''),
+      'みんなで自由に並べてみよう。',
+    );
+    expect(
+      const AppLocalizations(AppLocale.en).topicDescription('자유롭게 배치해 보세요.'),
+      'Arrange the cards any way you like.',
+    );
+    expect(
+      const AppLocalizations(AppLocale.ko).topicDescription('独自の説明'),
+      '独自の説明',
+    );
+  });
 }
 
 class _FakeCloudTierRepository implements CloudTierRepository {
@@ -322,6 +337,12 @@ class _FakeCloudTierRepository implements CloudTierRepository {
   Future<TierTopic> saveTopic(TierTopic topic) async => topic;
 
   @override
+  Future<void> setTopicPublic(String topicId, {required bool isPublic}) async {}
+
+  @override
+  Future<void> deleteTopic(String topicId) async {}
+
+  @override
   Future<void> saveSubmission(UserTierSubmission submission) async {
     savedSubmissions.add(submission);
     submissions
@@ -345,6 +366,10 @@ class _FakeCloudTierRepository implements CloudTierRepository {
     required String postId,
     String? replyId,
   }) async {}
+
+  @override
+  Future<bool> reportTopic(String topicId, {required String reason}) async =>
+      true;
 
   @override
   Future<void> setTopicLike(String topicId, {required bool liked}) async {}

@@ -1,6 +1,8 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:flutter/foundation.dart';
 
+import '../firebase_options.dart';
 import '../repositories/firebase_tier_repository.dart';
 
 class FirebaseBootstrapResult {
@@ -23,25 +25,29 @@ abstract final class FirebaseBootstrap {
     'FIREBASE_STORAGE_BUCKET',
   );
 
-  static bool get configured =>
+  static bool get _environmentConfigured =>
       _apiKey.isNotEmpty &&
       _appId.isNotEmpty &&
       _messagingSenderId.isNotEmpty &&
       _projectId.isNotEmpty;
 
-  static Future<FirebaseBootstrapResult> initialize() async {
-    if (!configured) return const FirebaseBootstrapResult();
-    try {
-      await Firebase.initializeApp(
-        options: const FirebaseOptions(
+  static bool get configured => kIsWeb || _environmentConfigured;
+
+  static FirebaseOptions get _options => _environmentConfigured
+      ? const FirebaseOptions(
           apiKey: _apiKey,
           appId: _appId,
           messagingSenderId: _messagingSenderId,
           projectId: _projectId,
           authDomain: _authDomain,
           storageBucket: _storageBucket,
-        ),
-      );
+        )
+      : DefaultFirebaseOptions.web;
+
+  static Future<FirebaseBootstrapResult> initialize() async {
+    if (!configured) return const FirebaseBootstrapResult();
+    try {
+      await Firebase.initializeApp(options: _options);
       final auth = FirebaseAuth.instance;
       if (auth.currentUser == null) {
         await auth.signInAnonymously();
