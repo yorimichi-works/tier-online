@@ -24,6 +24,92 @@
   <meta property="og:description" content="Create and share tier lists for free with Tier Online.">
   <meta name="theme-color" content="#0D0D0F">
 
+  <link rel="preload"
+    href="assets/assets/fonts/NotoSansJP-TierSubset.ttf"
+    as="font"
+    type="font/ttf"
+    crossorigin>
+  <link rel="preload"
+    href="assets/assets/fonts/NotoSansKR-TierSubset.ttf"
+    as="font"
+    type="font/ttf"
+    crossorigin>
+
+  <style>
+    @font-face {
+      font-family: "TierNotoSansJP";
+      src: url("assets/assets/fonts/NotoSansJP-TierSubset.ttf") format("truetype");
+      font-display: swap;
+      font-style: normal;
+      font-weight: 500;
+    }
+
+    @font-face {
+      font-family: "TierNotoSansKR";
+      src: url("assets/assets/fonts/NotoSansKR-TierSubset.ttf") format("truetype");
+      font-display: swap;
+      font-style: normal;
+      font-weight: 500;
+    }
+
+    html,
+    body {
+      background: #0D0D0F;
+      font-family: "TierNotoSansJP", "TierNotoSansKR", "Noto Sans",
+        "Noto Sans JP", "Noto Sans KR", "Yu Gothic", YuGothic,
+        "Yu Gothic UI", "Hiragino Kaku Gothic ProN", Meiryo,
+        "Apple SD Gothic Neo", "Malgun Gothic", Arial, Helvetica, sans-serif;
+      margin: 0;
+    }
+
+    #app-loading {
+      align-items: center;
+      background: #0D0D0F;
+      color: #F4F4F7;
+      display: flex;
+      inset: 0;
+      justify-content: center;
+      position: fixed;
+      z-index: 2147483647;
+    }
+
+    #app-loading[hidden] {
+      display: none;
+    }
+
+    .app-loading-content {
+      align-items: center;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    .app-loading-mark {
+      animation: loading-pulse 1s ease-in-out infinite alternate;
+      background: linear-gradient(135deg, #5AC8D8, #8B7CFF);
+      border-radius: 12px;
+      height: 8px;
+      width: 72px;
+    }
+
+    .app-loading-label {
+      font-family: Arial, "Yu Gothic", YuGothic, Meiryo,
+        "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+      font-size: 16px;
+      font-weight: 700;
+      letter-spacing: .02em;
+    }
+
+    @keyframes loading-pulse {
+      from { opacity: .45; transform: scaleX(.72); }
+      to { opacity: 1; transform: scaleX(1); }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .app-loading-mark { animation: none; }
+    }
+  </style>
+
   <!-- iOS meta tags & icons -->
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black">
@@ -35,6 +121,9 @@
 
   <title>Tier Online | Create and Share Tier Lists</title>
   <link rel="manifest" href="manifest.json">
+  <script async
+    src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-3186852093801241"
+    crossorigin="anonymous"></script>
   <script>
     (() => {
       const pathLocale = ['ja', 'ko', 'en'].includes(location.pathname.split('/')[1])
@@ -94,6 +183,36 @@
   </script>
 </head>
 <body>
+  <div id="app-loading" role="status" aria-live="polite">
+    <div class="app-loading-content">
+      <div class="app-loading-mark" aria-hidden="true"></div>
+      <div class="app-loading-label" id="app-loading-label">Tier Online</div>
+    </div>
+  </div>
+  <script>
+    (() => {
+      const locale = document.documentElement.lang;
+      const label = document.getElementById('app-loading-label');
+      label.textContent = locale === 'ko'
+        ? '티어표 온라인'
+        : locale === 'ja'
+          ? 'tier表オンライン'
+          : 'Tier Online';
+      window.addEventListener('flutter-first-frame', () => {
+        // CanvasKit can complete its first frame just before its bundled
+        // fallback fonts are attached to the paragraph renderer. Keep the
+        // loading cover for a short stabilization window so that transient
+        // missing-glyph boxes are never exposed.
+        window.setTimeout(() => {
+          requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+              document.getElementById('app-loading')?.setAttribute('hidden', '');
+            });
+          });
+        }, 250);
+      }, { once: true });
+    })();
+  </script>
   <!--
     You can customize the "flutter_bootstrap.js" script.
     This is useful to provide a custom configuration to the Flutter loader
@@ -102,6 +221,33 @@
     For more details:
     * https://docs.flutter.dev/platform-integration/web/initialization
   -->
-  <script src="flutter_bootstrap.js" async></script>
+  <script>
+    // Run outside Flutter's cached bootstrap so even visitors controlled by
+    // an older Flutter service worker can move to the latest production UI.
+    (async () => {
+      if ('serviceWorker' in navigator) {
+        try {
+          const registrations = await navigator.serviceWorker.getRegistrations();
+          await Promise.all(
+            registrations.map((registration) => registration.unregister()),
+          );
+          if ('caches' in window) {
+            const keys = await caches.keys();
+            await Promise.all(
+              keys
+                .filter((key) => key.startsWith('flutter-app-cache'))
+                .map((key) => caches.delete(key)),
+            );
+          }
+        } catch (_) {
+          // Always continue to Flutter, even when browser storage is blocked.
+        }
+      }
+      const bootstrap = document.createElement('script');
+      bootstrap.src = `flutter_bootstrap.js?v=${Date.now()}`;
+      bootstrap.async = true;
+      document.body.appendChild(bootstrap);
+    })();
+  </script>
 </body>
 </html>
