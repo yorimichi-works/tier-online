@@ -335,11 +335,15 @@ class _TierBuilderScreenState extends State<TierBuilderScreen> {
               PrimaryButton(
                 label: _unplaced.isEmpty
                     ? context.l10n.t('finishTier')
+                    : placedCount > 0
+                    ? context.l10n.format('finishTierPartial', {
+                        'count': _unplaced.length,
+                      })
                     : context.l10n.format('remainingCards', {
                         'count': _unplaced.length,
                       }),
                 icon: Icons.auto_awesome_rounded,
-                onPressed: _unplaced.isEmpty ? _complete : null,
+                onPressed: placedCount > 0 ? _complete : null,
               ),
               const SizedBox(height: 9),
               Center(

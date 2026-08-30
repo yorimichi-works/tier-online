@@ -507,6 +507,52 @@ class _TagWrap extends StatelessWidget {
   }
 }
 
+const _bannerGradients = [
+  [Color(0xFF1687A7), Color(0xFF22536B)],
+  [Color(0xFF5D9147), Color(0xFF365F3A)],
+  [Color(0xFF8A57B5), Color(0xFF573A74)],
+  [Color(0xFFB65F70), Color(0xFF75434D)],
+  [Color(0xFF6D79BB), Color(0xFF484F82)],
+];
+
+List<Color> _bannerGradientFor(String id) =>
+    _bannerGradients[id.hashCode.abs() % _bannerGradients.length];
+
+/// 画像のないTierのバナー/サムネイル。画像ありのカードと高さ・見た目を
+/// 揃えるため、タイトルを大きくあしらったグラデーションで代替する。
+class _TopicTextBanner extends StatelessWidget {
+  const _TopicTextBanner({required this.topic, this.padding = 20});
+  final TierTopic topic;
+  final double padding;
+  @override
+  Widget build(BuildContext context) {
+    final colors = _bannerGradientFor(topic.id);
+    return Container(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: colors,
+        ),
+      ),
+      alignment: Alignment.center,
+      padding: EdgeInsets.all(padding),
+      child: Text(
+        topic.title,
+        maxLines: 2,
+        textAlign: TextAlign.center,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(
+          color: Colors.white,
+          fontWeight: FontWeight.w900,
+          fontSize: padding >= 20 ? 21 : 13,
+          height: 1.25,
+        ),
+      ),
+    );
+  }
+}
+
 class _FullTopicCardBody extends StatelessWidget {
   const _FullTopicCardBody({
     required this.topic,
@@ -528,44 +574,28 @@ class _FullTopicCardBody extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final face = topic.faceItem;
-    final hasBanner = face?.hasImage ?? false;
+    final hasImage = face?.hasImage ?? false;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        if (hasBanner)
-          AspectRatio(
-            aspectRatio: 16 / 9,
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                _TierItemImage(imageUrl: face!.imageUrl!),
-                if (topic.isTrending)
-                  const Positioned(top: 10, right: 10, child: _TrendingBadge()),
-              ],
-            ),
+        AspectRatio(
+          aspectRatio: 16 / 9,
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              hasImage
+                  ? _TierItemImage(imageUrl: face!.imageUrl!)
+                  : _TopicTextBanner(topic: topic),
+              if (topic.isTrending)
+                const Positioned(top: 10, right: 10, child: _TrendingBadge()),
+            ],
           ),
+        ),
         Padding(
           padding: const EdgeInsets.all(16),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              if (!hasBanner)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 10),
-                  child: Row(
-                    children: [
-                      if (topic.isTrending) const _TrendingBadge(),
-                      const Spacer(),
-                      GestureDetector(
-                        onTap: onLike,
-                        child: _LikeCountBadge(
-                          count: topic.likeCount,
-                          liked: liked,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -580,16 +610,11 @@ class _FullTopicCardBody extends StatelessWidget {
                       ),
                     ),
                   ),
-                  if (hasBanner) ...[
-                    const SizedBox(width: 8),
-                    GestureDetector(
-                      onTap: onLike,
-                      child: _LikeCountBadge(
-                        count: topic.likeCount,
-                        liked: liked,
-                      ),
-                    ),
-                  ],
+                  const SizedBox(width: 8),
+                  GestureDetector(
+                    onTap: onLike,
+                    child: _LikeCountBadge(count: topic.likeCount, liked: liked),
+                  ),
                 ],
               ),
               const SizedBox(height: 6),
@@ -688,23 +713,23 @@ class _CompactTopicCardBody extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final face = topic.faceItem;
-    final hasThumb = face?.hasImage ?? false;
+    final hasImage = face?.hasImage ?? false;
     return Padding(
       padding: const EdgeInsets.all(12),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          if (hasThumb) ...[
-            ClipRRect(
-              borderRadius: BorderRadius.circular(12),
-              child: SizedBox(
-                width: 64,
-                height: 64,
-                child: _TierItemImage(imageUrl: face!.imageUrl!),
-              ),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(12),
+            child: SizedBox(
+              width: 64,
+              height: 64,
+              child: hasImage
+                  ? _TierItemImage(imageUrl: face!.imageUrl!)
+                  : _TopicTextBanner(topic: topic, padding: 6),
             ),
-            const SizedBox(width: 13),
-          ],
+          ),
+          const SizedBox(width: 13),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,

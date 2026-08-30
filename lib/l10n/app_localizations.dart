@@ -161,14 +161,19 @@ class AppLocalizations {
       'authErrorCredentialInUse': 'このメールアドレスは別のアカウントで使われています',
       'authErrorGeneric': 'エラーが発生しました。もう一度お試しください',
       'authErrorNetwork': '通信に失敗しました。インターネット接続をご確認ください。',
+      'googleAccountConflictTitle': 'アカウントを統合します',
+      'googleAccountConflictBody':
+          '{email} は既にパスワードで登録されています。パスワードを入力すると、そのアカウントにGoogleログインを追加できます。',
       'verifyEmailTitle': 'メールアドレスを確認してください',
-      'verifyEmailDescription': '確認メールを送信しました。メール内のリンクを開いて、メールアドレスの確認を完了してください。',
+      'verifyEmailDescription':
+          '確認メールを送信しました。メール内のリンクを開いて、メールアドレスの確認を完了してください。',
       'verificationEmailSent': '確認メールを送信しました',
       'verificationEmailSendFailed':
           'アカウントは作成されましたが、確認メールを送信できませんでした。\n「メールを再送する」からもう一度お試しください。',
       'verificationEmailResent': '確認メールを再送しました',
       'verificationResendCooldown': '秒後にもう一度送信できます',
-      'verificationNotCompleted': 'まだメールアドレスの確認が完了していません。メール内のリンクを開いてから、もう一度お試しください。',
+      'verificationNotCompleted':
+          'まだメールアドレスの確認が完了していません。メール内のリンクを開いてから、もう一度お試しください。',
       'verificationCompleted': 'メールアドレスの確認が完了しました',
       'resendVerificationEmail': 'メールを再送する',
       'checkVerification': '確認しました',
@@ -278,6 +283,7 @@ class AppLocalizations {
       'builderHelp': '行へドラッグ。タップでもランクを選べます。カード同士へドロップすると順番を変えられます。',
       'allPlaced': 'すべて配置しました',
       'finishTier': 'このTierで完成',
+      'finishTierPartial': 'ここまでで保存(残り{count}枚)',
       'remainingCards': '残り{count}枚を配置してください',
       'placementSaved': '配置と順番はこの端末に保存されます',
       'publishPreview': '公開前プレビュー',
@@ -362,7 +368,7 @@ class AppLocalizations {
       'shareGenerateFailed': '共有画像を生成できませんでした: {error}',
       'shareOpenFailed': '共有画面を開けませんでした',
       'addImageFailed': '画像を追加できませんでした: {error}',
-      'imageSearchConfirm': 'Google検索から画像を取得しますか？',
+      'imageSearchConfirm': 'Web検索から画像を取得しますか？',
       'imageSearchDescription':
           '追加した各カード名で画像検索し、検索結果の先頭画像をまとめて設定します。画像の権利・利用条件は公開前に必ず確認してください。',
       'later': 'あとで',
@@ -371,7 +377,7 @@ class AppLocalizations {
       'imagesUpdated': '{count}件のカードに画像を設定しました',
       'tagsExample': 'ゲーム  任天堂  マリオ',
       'cardsAdded': '{count}枚追加済み ・ タップで名前や画像を編集',
-      'imageSearchNotConfigured': 'Google画像検索の設定がまだ完了していません',
+      'imageSearchNotConfigured': 'Web画像検索の設定がまだ完了していません',
       'imageSearchFailed': '画像検索に失敗しました: {error}',
       'imageSearchUnavailable': '画像検索を利用できませんでした: {error}',
     },
@@ -450,14 +456,19 @@ class AppLocalizations {
       'authErrorCredentialInUse': '이 이메일 주소는 다른 계정에서 사용 중입니다',
       'authErrorGeneric': '오류가 발생했습니다. 다시 시도해 주세요',
       'authErrorNetwork': '통신에 실패했습니다. 인터넷 연결을 확인해 주세요.',
+      'googleAccountConflictTitle': '계정을 통합합니다',
+      'googleAccountConflictBody':
+          '{email}은(는) 이미 비밀번호로 등록되어 있습니다. 비밀번호를 입력하면 해당 계정에 Google 로그인을 추가할 수 있습니다.',
       'verifyEmailTitle': '이메일 주소를 확인해 주세요',
-      'verifyEmailDescription': '확인 메일을 보냈습니다. 메일에 있는 링크를 열어 이메일 주소 확인을 완료해 주세요.',
+      'verifyEmailDescription':
+          '확인 메일을 보냈습니다. 메일에 있는 링크를 열어 이메일 주소 확인을 완료해 주세요.',
       'verificationEmailSent': '확인 메일을 보냈습니다',
       'verificationEmailSendFailed':
           '계정은 생성되었지만 확인 메일을 보내지 못했습니다.\n"메일 다시 보내기"에서 다시 시도해 주세요.',
       'verificationEmailResent': '확인 메일을 다시 보냈습니다',
       'verificationResendCooldown': '초 후에 다시 보낼 수 있습니다',
-      'verificationNotCompleted': '아직 이메일 주소 확인이 완료되지 않았습니다. 메일에 있는 링크를 연 후 다시 시도해 주세요.',
+      'verificationNotCompleted':
+          '아직 이메일 주소 확인이 완료되지 않았습니다. 메일에 있는 링크를 연 후 다시 시도해 주세요.',
       'verificationCompleted': '이메일 주소 확인이 완료되었습니다',
       'resendVerificationEmail': '메일 다시 보내기',
       'checkVerification': '확인했습니다',
@@ -567,6 +578,7 @@ class AppLocalizations {
       'builderHelp': '행으로 드래그하거나 탭해서 랭크를 선택하세요. 카드 위에 놓으면 순서를 바꿀 수 있습니다.',
       'allPlaced': '모든 카드를 배치했습니다',
       'finishTier': '이 티어로 완성',
+      'finishTierPartial': '지금까지 저장 (남은 {count}장)',
       'remainingCards': '남은 카드 {count}장을 배치해 주세요',
       'placementSaved': '배치와 순서는 이 기기에 저장됩니다',
       'publishPreview': '공개 전 미리보기',
@@ -651,7 +663,7 @@ class AppLocalizations {
       'shareGenerateFailed': '공유 이미지를 만들지 못했습니다: {error}',
       'shareOpenFailed': '공유 화면을 열지 못했습니다',
       'addImageFailed': '이미지를 추가하지 못했습니다: {error}',
-      'imageSearchConfirm': 'Google 검색에서 이미지를 가져올까요?',
+      'imageSearchConfirm': '웹 검색에서 이미지를 가져올까요?',
       'imageSearchDescription':
           '각 카드 이름으로 이미지를 검색해 첫 번째 결과를 설정합니다. 공개 전 이미지 권리와 이용 조건을 확인하세요.',
       'later': '나중에',
@@ -660,7 +672,7 @@ class AppLocalizations {
       'imagesUpdated': '카드 {count}개에 이미지를 설정했습니다',
       'tagsExample': '게임  닌텐도  마리오',
       'cardsAdded': '{count}장 추가됨 ・ 탭하여 이름이나 이미지 편집',
-      'imageSearchNotConfigured': 'Google 이미지 검색 설정이 완료되지 않았습니다',
+      'imageSearchNotConfigured': '웹 이미지 검색 설정이 완료되지 않았습니다',
       'imageSearchFailed': '이미지 검색에 실패했습니다: {error}',
       'imageSearchUnavailable': '이미지 검색을 사용할 수 없습니다: {error}',
     },
@@ -741,6 +753,9 @@ class AppLocalizations {
       'authErrorGeneric': 'Something went wrong. Please try again',
       'authErrorNetwork':
           'Connection failed. Please check your internet connection.',
+      'googleAccountConflictTitle': 'Link your accounts',
+      'googleAccountConflictBody':
+          '{email} is already registered with a password. Enter that password to add Google sign-in to the same account.',
       'verifyEmailTitle': 'Verify your email address',
       'verifyEmailDescription':
           'We sent a verification email. Open the link in the email to verify your address.',
@@ -865,6 +880,7 @@ class AppLocalizations {
           'Drag to a row or tap to choose a rank. Drop onto another card to reorder.',
       'allPlaced': 'All cards placed',
       'finishTier': 'Finish This Tier List',
+      'finishTierPartial': 'Save as-is ({count} left)',
       'remainingCards': 'Place the remaining {count} cards',
       'placementSaved': 'Your placement and order are saved on this device',
       'publishPreview': 'Preview Before Publishing',
@@ -960,7 +976,7 @@ class AppLocalizations {
       'shareGenerateFailed': 'Could not generate the share image: {error}',
       'shareOpenFailed': 'Could not open the share screen',
       'addImageFailed': 'Could not add the image: {error}',
-      'imageSearchConfirm': 'Get images from Google Search?',
+      'imageSearchConfirm': 'Get images from Web Search?',
       'imageSearchDescription':
           'Search each card name and use the first image result. Check image rights and usage terms before publishing.',
       'later': 'Later',
@@ -969,7 +985,7 @@ class AppLocalizations {
       'imagesUpdated': 'Added images to {count} cards',
       'tagsExample': 'games  nintendo  mario',
       'cardsAdded': '{count} added ・ tap to edit names or images',
-      'imageSearchNotConfigured': 'Google Image Search is not configured yet',
+      'imageSearchNotConfigured': 'Web image search is not configured yet',
       'imageSearchFailed': 'Image search failed: {error}',
       'imageSearchUnavailable': 'Image search is unavailable: {error}',
     },

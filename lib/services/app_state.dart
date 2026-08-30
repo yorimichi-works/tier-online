@@ -51,6 +51,10 @@ enum AuthResultStatus {
   wrongPassword,
   userNotFound,
   credentialInUse,
+  // Googleでログイン/連携しようとしたメールアドレスが、既に別の方法
+  // (主にメール/パスワード)で登録済みの場合。パスワード入力後に
+  // linkPendingGoogleCredential()を呼んでアカウントを統合する。
+  googleAccountConflict,
   generic,
 }
 
@@ -840,17 +844,29 @@ class AppState extends ChangeNotifier {
     }
   }
 
+  /// Googleでのログイン/連携が「このメールは別方式で登録済み」で失敗した際、
+  /// パスワード確認後に統合できるよう保持しておく認証情報とメールアドレス。
+  AuthCredential? _pendingGoogleCredential;
+  String? _pendingGoogleEmail;
+  String? get pendingGoogleAccountEmail => _pendingGoogleEmail;
+  void clearPendingGoogleCredential() {
+    _pendingGoogleCredential = null;
+    _pendingGoogleEmail = null;
+  }
+
   Future<AuthResult> signInWithGoogle() async {
     final auth = _auth;
     if (auth == null) return const AuthResult(AuthResultStatus.generic);
+    GoogleSignInAccount? googleUser;
+    AuthCredential? credential;
     try {
       final googleSignIn = GoogleSignIn();
-      final googleUser = await googleSignIn.signIn();
+      googleUser = await googleSignIn.signIn();
       if (googleUser == null) {
         return const AuthResult(AuthResultStatus.generic);
       }
       final googleAuth = await googleUser.authentication;
-      final credential = GoogleAuthProvider.credential(
+      credential = GoogleAuthProvider.credential(
         accessToken: googleAuth.accessToken,
         idToken: googleAuth.idToken,
       );
@@ -863,11 +879,45 @@ class AppState extends ChangeNotifier {
       notifyListeners();
       return const AuthResult(AuthResultStatus.success);
     } on FirebaseAuthException catch (error) {
+      if (credential != null &&
+          (error.code == 'email-already-in-use' ||
+              error.code == 'credential-already-in-use' ||
+              error.code == 'account-exists-with-different-credential')) {
+        _pendingGoogleCredential = credential;
+        _pendingGoogleEmail = googleUser?.email;
+        notifyListeners();
+        return const AuthResult(AuthResultStatus.googleAccountConflict);
+      }
       return AuthResult.fromException(error);
     } on Object catch (error) {
       _cloudError = error;
       notifyListeners();
       return const AuthResult(AuthResultStatus.generic);
+    }
+  }
+
+  /// [pendingGoogleAccountEmail]のパスワードでサインインし、直前に失敗した
+  /// Google認証情報をそのアカウントに連携する。以降はメール/パスワードと
+  /// Googleのどちらでもログインできる。
+  Future<AuthResult> linkPendingGoogleCredential(String password) async {
+    final auth = _auth;
+    final pending = _pendingGoogleCredential;
+    final email = _pendingGoogleEmail;
+    if (auth == null || pending == null || email == null) {
+      return const AuthResult(AuthResultStatus.generic);
+    }
+    try {
+      await auth.signInWithEmailAndPassword(email: email, password: password);
+      try {
+        await auth.currentUser?.linkWithCredential(pending);
+      } on FirebaseAuthException catch (error) {
+        if (error.code != 'provider-already-linked') rethrow;
+      }
+      clearPendingGoogleCredential();
+      notifyListeners();
+      return const AuthResult(AuthResultStatus.success);
+    } on FirebaseAuthException catch (error) {
+      return AuthResult.fromException(error);
     }
   }
 

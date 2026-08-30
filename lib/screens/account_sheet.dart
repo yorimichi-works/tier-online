@@ -48,6 +48,9 @@ class _AccountSheetBodyState extends State<_AccountSheetBody> {
     AuthResultStatus.credentialInUse => context.l10n.t(
       'authErrorCredentialInUse',
     ),
+    AuthResultStatus.googleAccountConflict => context.l10n.t(
+      'authErrorGeneric',
+    ),
     AuthResultStatus.generic ||
     AuthResultStatus.success => context.l10n.t('authErrorGeneric'),
   };
@@ -102,6 +105,86 @@ class _AccountSheetBodyState extends State<_AccountSheetBody> {
   Future<void> _submitGoogle() async {
     setState(() => _submitting = true);
     final result = await widget.appState.signInWithGoogle();
+    if (!mounted) return;
+    setState(() => _submitting = false);
+    if (result.isSuccess) {
+      Navigator.of(context).pop();
+      return;
+    }
+    if (result.status == AuthResultStatus.googleAccountConflict) {
+      await _resolveGoogleAccountConflict();
+      return;
+    }
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(_authErrorMessage(result.status))));
+  }
+
+  Future<void> _resolveGoogleAccountConflict() async {
+    final email = widget.appState.pendingGoogleAccountEmail;
+    if (email == null) return;
+    final passwordController = TextEditingController();
+    final formKey = GlobalKey<FormState>();
+    final password = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(context.l10n.t('googleAccountConflictTitle')),
+        content: Form(
+          key: formKey,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                context.l10n.format('googleAccountConflictBody', {
+                  'email': email,
+                }),
+              ),
+              const SizedBox(height: 16),
+              TextFormField(
+                controller: passwordController,
+                obscureText: true,
+                autofocus: true,
+                decoration: InputDecoration(
+                  labelText: context.l10n.t('password'),
+                ),
+                validator: (value) => (value == null || value.isEmpty)
+                    ? context.l10n.t('authErrorWrongPassword')
+                    : null,
+                onFieldSubmitted: (value) {
+                  if (formKey.currentState?.validate() ?? false) {
+                    Navigator.of(dialogContext).pop(value);
+                  }
+                },
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              widget.appState.clearPendingGoogleCredential();
+              Navigator.of(dialogContext).pop();
+            },
+            child: Text(context.l10n.t('cancel')),
+          ),
+          FilledButton(
+            onPressed: () {
+              if (formKey.currentState?.validate() ?? false) {
+                Navigator.of(dialogContext).pop(passwordController.text);
+              }
+            },
+            child: Text(context.l10n.t('signIn')),
+          ),
+        ],
+      ),
+    );
+    passwordController.dispose();
+    if (password == null || !mounted) return;
+    setState(() => _submitting = true);
+    final result = await widget.appState.linkPendingGoogleCredential(
+      password,
+    );
     if (!mounted) return;
     setState(() => _submitting = false);
     if (result.isSuccess) {

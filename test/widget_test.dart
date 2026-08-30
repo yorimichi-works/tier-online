@@ -33,13 +33,13 @@ void main() {
     );
 
     expect(find.byType(NavigationBar), findsOneWidget);
-    expect(find.text('最強の妖怪Tier'), findsOneWidget);
+    expect(find.text('最強の妖怪Tier'), findsWidgets);
     expect(find.text('すべて'), findsOneWidget);
     expect(find.text('キャラクター'), findsOneWidget);
     expect(find.text('ゲーム'), findsOneWidget);
     expect(tester.takeException(), isNull);
 
-    final firstTopic = find.text('最強の妖怪Tier');
+    final firstTopic = find.text('最強の妖怪Tier').last;
     await tester.ensureVisible(firstTopic);
     await tester.pumpAndSettle();
     await tester.tap(firstTopic);
@@ -256,7 +256,7 @@ void main() {
     await tester.enterText(find.byType(TextField).last, '鬼\n天狗\n河童');
     await tester.tap(find.text('まとめて追加'));
     await tester.pumpAndSettle();
-    expect(find.text('Google検索から画像を取得しますか？'), findsOneWidget);
+    expect(find.text('Web検索から画像を取得しますか？'), findsOneWidget);
     await tester.tap(find.text('あとで'));
     await tester.pumpAndSettle();
     expect(find.text('鬼'), findsOneWidget);
@@ -299,7 +299,7 @@ void main() {
     await appState.initialize();
     await tester.pumpWidget(TierTableOnlineApp(appState: appState));
 
-    final topic = find.text('最強の妖怪Tier');
+    final topic = find.text('最強の妖怪Tier').last;
     await tester.ensureVisible(topic);
     await tester.pumpAndSettle();
     await tester.tap(topic);
@@ -342,7 +342,7 @@ void main() {
     await appState.initialize();
     await tester.pumpWidget(TierTableOnlineApp(appState: appState));
 
-    final topic = find.text('最強の妖怪Tier');
+    final topic = find.text('最強の妖怪Tier').last;
     await tester.ensureVisible(topic);
     await tester.pumpAndSettle();
     await tester.tap(topic);
@@ -514,7 +514,7 @@ void main() {
     expect(find.text('English'), findsOneWidget);
     await tester.tap(find.text('한국어'));
     await tester.pumpAndSettle();
-    expect(find.text('한국 티어'), findsOneWidget);
+    expect(find.text('한국 티어'), findsWidgets);
   });
 
   testWidgets('結果画面に共有PNG用の描画領域を表示する', (tester) async {

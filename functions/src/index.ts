@@ -48,6 +48,99 @@ type ImageSearchResult = {
   sourceUrl?: string;
 };
 
+async function searchWikipediaImage(
+  query: string,
+  locale: string,
+): Promise<ImageSearchResult> {
+  const language = ["ja", "ko", "en"].includes(locale) ? locale : "en";
+  const url = new URL(`https://${language}.wikipedia.org/w/api.php`);
+  url.search = new URLSearchParams({
+    action: "query",
+    format: "json",
+    generator: "search",
+    gsrsearch: query,
+    gsrnamespace: "0",
+    gsrlimit: "5",
+    prop: "pageimages|info",
+    piprop: "thumbnail",
+    pithumbsize: "1024",
+    inprop: "url",
+  }).toString();
+  const response = await fetch(url, {
+    headers: {
+      "Accept": "application/json",
+      "User-Agent": "tier-online/1.0",
+    },
+  });
+  if (!response.ok) {
+    const detail = await response.text();
+    console.error("Wikipedia image fallback failed", response.status, detail);
+    throw new HttpsError(
+      "unavailable",
+      "画像検索へ接続できませんでした",
+    );
+  }
+  const payload = await response.json() as {
+    query?: {
+      pages?: Record<string, {
+        fullurl?: string;
+        thumbnail?: {source?: string};
+      }>;
+    };
+  };
+  const pages = Object.values(payload.query?.pages ?? {});
+  const first = pages.find((page) => page.thumbnail?.source);
+  return {
+    query,
+    imageUrl: first?.thumbnail?.source,
+    sourceUrl: first?.fullurl,
+  };
+}
+
+async function searchOpenverseImage(
+  query: string,
+  locale: string,
+): Promise<ImageSearchResult> {
+  const url = new URL("https://api.openverse.org/v1/images/");
+  url.search = new URLSearchParams({
+    q: query,
+    mature: "false",
+    page_size: "1",
+  }).toString();
+  const response = await fetch(url, {
+    headers: {
+      "Accept": "application/json",
+      "User-Agent": "tier-online/1.0",
+    },
+  });
+  if (!response.ok) {
+    const detail = await response.text();
+    console.error("Openverse image fallback failed", response.status, detail);
+    throw new HttpsError(
+      "unavailable",
+      "画像検索へ接続できませんでした",
+    );
+  }
+  const payload = await response.json() as {
+    results?: Array<{
+      url?: string;
+      foreign_landing_url?: string;
+    }>;
+  };
+  const first = payload.results?.[0];
+  if (!first?.url) {
+    // Openverse has sparse results for some CJK queries. A localized
+    // Wikipedia lead image is a useful final fallback and keeps attribution
+    // available through the source page.
+    return searchWikipediaImage(query, locale);
+  }
+  return {
+    query,
+    imageUrl: first?.url,
+    sourceUrl: first?.foreign_landing_url,
+  };
+}
+
 export const searchTierItemImages = onCall(
   {secrets: [googleSearchApiKey, googleSearchEngineId]},
   async (request): Promise<{results: ImageSearchResult[]}> => {
@@ -101,11 +194,12 @@ export const searchTierItemImages = onCall(
       });
       if (!response.ok) {
         const detail = await response.text();
-        console.error("Google image search failed", response.status, detail);
-        throw new HttpsError(
-          "unavailable",
-          "Google画像検索へ接続できませんでした",
-        );
+        // Custom Search JSON API denies access to some newer Google Cloud
+        // projects even when the API is enabled. Keep Google as the primary
+        // provider, then fall back to Openverse's mature-content-filtered,
+        // openly licensed search so card creation remains usable.
+        console.warn("Google image search failed; using Openverse", response.status, detail);
+        return searchOpenverseImage(query, locale);
       }
       const payload = await response.json() as {
         items?: Array<{
@@ -114,10 +208,14 @@ export const searchTierItemImages = onCall(
         }>;
       };
       const first = payload.items?.[0];
+      if (!first?.link) {
+        console.warn("Google image search returned no results; using Openverse");
+        return searchOpenverseImage(query, locale);
+      }
       return {
         query,
-        imageUrl: first?.link,
-        sourceUrl: first?.image?.contextLink,
+        imageUrl: first.link,
+        sourceUrl: first.image?.contextLink,
       };
     }));
     return {results};
