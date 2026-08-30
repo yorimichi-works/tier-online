@@ -33,6 +33,21 @@ flutter run -d chrome
 
 Firebase設定なしでも起動でき、作成テーマ・評価・投稿を端末内へ保存します。
 
+## Firebase Hosting
+
+HostingはFirebaseプロジェクト `tier-online` のデフォルトサイトへ接続済みです。
+公開先は `https://tier-online.web.app` です。
+
+```sh
+flutter build web --release --no-wasm-dry-run
+firebase deploy --only hosting --project tier-online --dry-run
+firebase deploy --only hosting --project tier-online
+```
+
+現段階のHostingは全URLをFlutter Webの `index.html` へ返します。これにより
+`/{locale}/` と `/{locale}/tier/{tierId}` の直接アクセスにも対応します。
+Firestore、Authentication、Cloud FunctionsのデプロイはHosting手順に含めません。
+
 ## Firebaseを使う
 
 Firebase Authenticationで匿名認証を有効にし、Firestore DatabaseとStorageを作成してください。
