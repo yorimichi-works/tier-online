@@ -52,3 +52,6 @@ app.*.map.json
 artifacts/
 playwright/node_modules/
 playwright/.cache/
+
+# Semi-automatic translation batches contain production UGC.
+tmp/translations/

@@ -23,6 +23,22 @@
         {"fieldPath": "isPublic", "order": "ASCENDING"},
         {"fieldPath": "createdAt", "order": "DESCENDING"}
       ]
+    },
+    {
+      "collectionGroup": "topics",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {"fieldPath": "isPublic", "order": "ASCENDING"},
+        {"fieldPath": "moderationStatus", "order": "ASCENDING"}
+      ]
+    },
+    {
+      "collectionGroup": "topics",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {"fieldPath": "translationStatus", "order": "ASCENDING"},
+        {"fieldPath": "processingStartedAt", "order": "ASCENDING"}
+      ]
     }
   ],
   "fieldOverrides": []

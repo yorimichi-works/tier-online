@@ -27,6 +27,11 @@ import {
   normalizeLocale,
   wikipediaLanguage,
 } from "./internationalization";
+import {
+  contentVersionOf,
+  pendingTranslationsAfterSourceChange,
+  sourceFingerprint,
+} from "./translation/translationBatch";
 
 initializeApp();
 // 小規模運用で突発アクセスがそのまま大量インスタンス化しないよう上限を置く。
@@ -437,12 +442,24 @@ export const publishTierTopic = onCall(callableOptions, async (request) => {
     publishLimits.authenticated).publish;
   const dailyCounterReference = dailyTierCounterRef(firestore, uid);
   const rateLimitReference = rateLimitRef(firestore, uid);
+  const incomingSourceFingerprint = sourceFingerprint({
+    title: data.title,
+    description: data.description,
+    category: data.category,
+    tags: data.tags,
+    sourceLanguage: data.sourceLanguage ?? data.contentLanguage,
+  }, items.map((item) => ({id: item.id, name: item.name})));
 
   const result = await firestore.runTransaction(async (transaction) => {
     // --- 読み取りフェーズ(Firestoreトランザクションは読み取りを全て
     //     終えてからでないと書き込みできない) ---
     const existing = await transaction.get(topicReference);
     const isNewTopic = !existing.exists;
+    const existingData = (existing.data() ?? {}) as Record<string, unknown>;
+    const sourceChanged = isNewTopic ||
+      existingData.sourceContentHash !== incomingSourceFingerprint;
+    const contentVersion = isNewTopic ? 1 :
+      contentVersionOf(existingData) + (sourceChanged ? 1 : 0);
     assertTierCreationAllowed(isNewTopic, anonymous);
     if (existing.exists && existing.data()?.creatorId !== uid) {
       throw new HttpsError(
@@ -496,6 +513,15 @@ export const publishTierTopic = onCall(callableOptions, async (request) => {
       shareUploadedImages: data.shareUploadedImages ?? false,
       moderationStatus: moderation.status,
       moderationReasons: moderation.reasons,
+      contentVersion,
+      sourceContentHash: incomingSourceFingerprint,
+      ...(sourceChanged ? {
+        translations: pendingTranslationsAfterSourceChange(existingData),
+        translationStatus: "pending",
+        translationBatchId: FieldValue.delete(),
+        processingStartedAt: FieldValue.delete(),
+        translationUpdatedAt: FieldValue.serverTimestamp(),
+      } : {}),
       ...(isNewTopic ?
         {
           reportCount: 0,

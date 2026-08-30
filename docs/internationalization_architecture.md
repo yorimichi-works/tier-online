@@ -42,6 +42,8 @@ Dart側の正本は `lib/domain/internationalization.dart`、Functions側の正�
 固定UIはローカライズ辞書で管理する。ユーザー生成テキストは原文を保持し、閲覧時の同期翻訳は
 前提にしない。将来の翻訳はモデレーション後の非同期処理とし、翻訳結果を保存して再利用する。
 詳細は [future_multilingual_translation.md](future_multilingual_translation.md) を参照する。
+Phase 1-Cの半自動運用と安全境界は
+[phase_1c_translation_batch.md](phase_1c_translation_batch.md) を参照する。
 
 ## 言語・地域を追加するとき
 

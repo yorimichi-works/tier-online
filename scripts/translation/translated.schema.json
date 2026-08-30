@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Tier Online translated batch",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "batchId", "items"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "batchId": {"type": "string", "minLength": 1},
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["documentId", "sourceContentVersion", "translations"],
+        "properties": {
+          "documentId": {"type": "string", "minLength": 1},
+          "sourceContentVersion": {"type": "integer", "minimum": 1},
+          "translations": {
+            "type": "object",
+            "propertyNames": {"enum": ["ja", "en", "ko", "zh-TW", "pt-BR"]},
+            "additionalProperties": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["status", "reviewRequired"],
+              "properties": {
+                "status": {"enum": ["completed", "failed", "review_required"]},
+                "title": {"type": "string", "maxLength": 300},
+                "description": {"type": "string", "maxLength": 5000},
+                "category": {"type": "string", "maxLength": 200},
+                "tags": {"type": "array", "items": {"type": "string", "maxLength": 100}},
+                "itemNames": {"type": "object", "additionalProperties": {"type": "string", "maxLength": 300}},
+                "reviewRequired": {"type": "boolean"},
+                "translationErrorCode": {"type": "string", "maxLength": 100}
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
