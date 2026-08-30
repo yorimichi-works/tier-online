@@ -22,6 +22,7 @@ import {
 import {moderateText} from "./moderation";
 import {checkAndConsume, computeRateLimitUpdate, loadLimits, rateLimitRef} from "./rateLimit";
 import {assertTierCreationAllowed} from "./tierCreationPolicy";
+import {normalizeLocale, wikipediaLanguage} from "./internationalization";
 
 initializeApp();
 // 小規模運用で突発アクセスがそのまま大量インスタンス化しないよう上限を置く。
@@ -160,9 +161,7 @@ async function searchWikipediaImage(
   query: string,
   locale: string,
 ): Promise<ImageSearchResult> {
-  const language = locale === "zh-tw" ? "zh" :
-    locale === "pt-br" ? "pt" :
-      ["ja", "ko", "en"].includes(locale) ? locale : "en";
+  const language = wikipediaLanguage(locale);
   const url = new URL(`https://${language}.wikipedia.org/w/api.php`);
   url.search = new URLSearchParams({
     action: "query",
@@ -277,8 +276,7 @@ export const searchTierItemImages = onCall(
         "一度に検索できるカード名は1〜30件です",
       );
     }
-    const locale = ["ja", "ko", "zh-tw", "pt-br", "en"].includes(request.data?.locale) ?
-      request.data.locale as string : "en";
+    const locale = normalizeLocale(request.data?.locale);
     const firestore = getFirestore();
     const references = names.map((name) => firestore
       .collection(SHARED_IMAGE_COLLECTION)
@@ -535,8 +533,7 @@ export const publishTierTopic = onCall(callableOptions, async (request) => {
       await cacheSharedUploadedImages({
         uid,
         topicId,
-        locale: ["ja", "ko", "zh-tw", "pt-br", "en"].includes(data.contentLanguage) ?
-          data.contentLanguage : "en",
+        locale: normalizeLocale(data.contentLanguage),
         items,
       });
     } catch (error) {

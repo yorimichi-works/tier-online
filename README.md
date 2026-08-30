@@ -9,6 +9,9 @@
 表示言語 (`preferredLocale`) と利用地域 (`region`) は独立した設定として端末と
 Firestoreの `users/{uid}` に保存されます。
 
+言語・原文言語・地域・集計範囲を分離するコード上の方針は
+[`docs/internationalization_architecture.md`](docs/internationalization_architecture.md)を参照してください。
+
 Tierには `contentLanguage`、`targetRegion`、`categoryId` を保存します。地域は
 Firestoreパスへ埋め込まず、共通の `topics` コレクションを利用します。集合結果の
 地域別集計は `tierRegionStats/{tierId}_{region}` に保存されます。

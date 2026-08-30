@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../l10n/app_localizations.dart';
+import '../domain/internationalization.dart';
 
 abstract final class TierCategory {
   static const ids = <String>[
@@ -310,6 +310,7 @@ class UserTierSubmission {
     required this.createdAt,
     required this.placements,
     this.region = 'JP',
+    this.contentLanguage = AppLocale.ja,
   });
   final String id;
   final String topicId;
@@ -317,6 +318,7 @@ class UserTierSubmission {
   final DateTime createdAt;
   final Map<TierRank, List<String>> placements;
   final String region;
+  final AppLocale contentLanguage;
   int get placedCount =>
       placements.values.fold(0, (total, items) => total + items.length);
 }

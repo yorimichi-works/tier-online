@@ -12,11 +12,15 @@ import 'package:tier_table_online/services/tier_aggregation_service.dart';
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
-  test('JP・KR・TW・BRを各言語へ、それ以外を英語へ振り分ける', () {
+  test('JP・KR・TW/HK・BRを各言語へ、それ以外を英語へ振り分ける', () {
     expect(AppLocaleParser.fromDevice(const Locale('en', 'JP')), AppLocale.ja);
     expect(AppLocaleParser.fromDevice(const Locale('en', 'KR')), AppLocale.ko);
     expect(
       AppLocaleParser.fromDevice(const Locale('zh', 'TW')),
+      AppLocale.zhTw,
+    );
+    expect(
+      AppLocaleParser.fromDevice(const Locale('zh', 'HK')),
       AppLocale.zhTw,
     );
     expect(AppLocaleParser.fromCode('zh-TW'), AppLocale.zhTw);
@@ -99,6 +103,8 @@ void main() {
       placements: {
         TierRank.s: [item.id],
       },
+      region: 'BR',
+      contentLanguage: AppLocale.ptBr,
     );
     final talk = TalkPost(
       id: 'talk-1',
@@ -130,6 +136,8 @@ void main() {
     expect(restoredTopic.items.single.imageUrl, item.imageUrl);
     expect(restoredTopic.shareUploadedImages, isTrue);
     expect(restoredSubmission!.placements[TierRank.s], [item.id]);
+    expect(restoredSubmission.region, 'BR');
+    expect(restoredSubmission.contentLanguage, AppLocale.ptBr);
     expect(restoredTalk.body, 'これはS');
     expect(restoredTalk.replies.single.stance, ReplyStance.agree);
     expect(restoredTalk.replies.single.authorUserId, 'reply-user');

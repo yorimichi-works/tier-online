@@ -7,7 +7,7 @@
   },
   "scripts": {
     "build": "tsc",
-    "test": "npm run build && node --test lib/aggregation.test.js lib/moderation.test.js lib/imageSearch.test.js lib/accountDeletion.test.js lib/tierCreationPolicy.test.js",
+    "test": "npm run build && node --test lib/aggregation.test.js lib/moderation.test.js lib/imageSearch.test.js lib/accountDeletion.test.js lib/tierCreationPolicy.test.js lib/internationalization.test.js",
     "migrate:localization": "node scripts/migrate-localization.js"
   },
   "dependencies": {

@@ -46,6 +46,7 @@ flutter:
     - assets/branding/tier-logo.png
     - assets/branding/tier-logo-ko.png
     - assets/branding/tier-logo-en.png
+    - assets/onboarding/
     - assets/starter_tiers/items/pasta/
     - assets/starter_tiers/items/breakfast/
     - assets/starter_tiers/items/pizza/

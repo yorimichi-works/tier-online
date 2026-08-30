@@ -1,4 +1,4 @@
-import '../l10n/app_localizations.dart';
+import '../domain/internationalization.dart';
 import 'tier_models.dart';
 
 abstract final class TierSerialization {
@@ -140,7 +140,10 @@ abstract final class TierSerialization {
     contentLanguage:
         AppLocaleParser.fromCode(json['contentLanguage'] as String?) ??
         AppLocale.ja,
-    targetRegion: json['targetRegion'] as String? ?? 'JP',
+    targetRegion: SupportedRegion.normalize(
+      json['targetRegion'] as String?,
+      fallback: 'JP',
+    ),
     categoryId:
         json['categoryId'] as String? ??
         TierCategory.fromLegacy(json['category'] as String? ?? ''),
@@ -160,6 +163,7 @@ abstract final class TierSerialization {
       (key, items) => MapEntry(key.name, items),
     ),
     'region': value.region,
+    'contentLanguage': value.contentLanguage.code,
   };
 
   static UserTierSubmission submissionFromJson(Map<String, Object?> json) =>
@@ -171,7 +175,13 @@ abstract final class TierSerialization {
         placements: _placementsFromJson(
           json['placements']! as Map<Object?, Object?>,
         ),
-        region: json['region'] as String? ?? 'JP',
+        region: SupportedRegion.normalize(
+          json['region'] as String?,
+          fallback: 'JP',
+        ),
+        contentLanguage:
+            AppLocaleParser.fromCode(json['contentLanguage'] as String?) ??
+            AppLocale.ja,
       );
 
   static Map<TierRank, List<String>> _placementsFromJson(

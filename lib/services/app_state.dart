@@ -162,6 +162,7 @@ class AppState extends ChangeNotifier {
   Object? _cloudError;
   ThemeMode _themeMode = ThemeMode.dark;
   bool _animationsEnabled = true;
+  bool _hasSeenOnboarding = false;
   AppLocale _locale = AppLocale.ja;
   String _region = 'JP';
 
@@ -193,6 +194,7 @@ class AppState extends ChangeNotifier {
 
   ThemeMode get themeMode => _themeMode;
   bool get animationsEnabled => _animationsEnabled;
+  bool get hasSeenOnboarding => _hasSeenOnboarding;
   AppLocale get locale => _locale;
   String get region => _region;
   String get initialPath => _initialPath;
@@ -315,6 +317,8 @@ class AppState extends ChangeNotifier {
         createdAt: DateTime.now(),
         placements: _placements[topicId]!,
         region: _region,
+        contentLanguage:
+            _repository.getById(topicId)?.contentLanguage ?? _locale,
       );
     }
     if (_cloudRepository == null) return null;
@@ -356,13 +360,19 @@ class AppState extends ChangeNotifier {
     );
     _locale =
         pathLocale ?? savedLocale ?? AppLocaleParser.fromDevice(_deviceLocale);
-    _region = preferences.getString('region') ?? _locale.defaultRegion;
+    _region = SupportedRegion.normalize(
+      preferences.getString('region'),
+      fallback: _locale.defaultRegion,
+    );
     if (_cloudRepository != null && pathLocale == null) {
       try {
         final remote = await _cloudRepository!.loadUserPreferences();
         if (remote != null) {
           _locale = AppLocaleParser.fromCode(remote.preferredLocale) ?? _locale;
-          _region = remote.region;
+          _region = SupportedRegion.normalize(
+            remote.region,
+            fallback: _locale.defaultRegion,
+          );
           await preferences.setString('preferredLocale', _locale.code);
           await preferences.setString('region', _region);
         }
@@ -376,6 +386,7 @@ class AppState extends ChangeNotifier {
       _ => ThemeMode.dark,
     };
     _animationsEnabled = preferences.getBool('animationsEnabled') ?? true;
+    _hasSeenOnboarding = preferences.getBool('hasSeenOnboarding') ?? false;
     _anonymousId = preferences.getString('anonymousId') ?? '';
     _likedTopicIds.addAll(
       preferences.getStringList('likedTopicIds') ?? const [],
@@ -447,7 +458,10 @@ class AppState extends ChangeNotifier {
         final remote = await cloudRepository.loadUserPreferences();
         if (remote != null) {
           _locale = AppLocaleParser.fromCode(remote.preferredLocale) ?? _locale;
-          _region = remote.region;
+          _region = SupportedRegion.normalize(
+            remote.region,
+            fallback: _locale.defaultRegion,
+          );
           await preferences.setString('preferredLocale', _locale.code);
           await preferences.setString('region', _region);
         }
@@ -484,6 +498,14 @@ class AppState extends ChangeNotifier {
     await preferences.setBool('animationsEnabled', value);
   }
 
+  Future<void> markOnboardingSeen() async {
+    if (_hasSeenOnboarding) return;
+    _hasSeenOnboarding = true;
+    notifyListeners();
+    final preferences = await SharedPreferences.getInstance();
+    await preferences.setBool('hasSeenOnboarding', true);
+  }
+
   Future<void> setLocale(AppLocale value) async {
     if (_locale == value) return;
     _locale = value;
@@ -494,11 +516,12 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> setRegion(String value) async {
-    final changed = _region != value;
-    _region = value;
+    final normalized = SupportedRegion.normalize(value);
+    final changed = _region != normalized;
+    _region = normalized;
     if (changed) notifyListeners();
     final preferences = await SharedPreferences.getInstance();
-    await preferences.setString('region', value);
+    await preferences.setString('region', normalized);
     await _syncUserPreferences();
   }
 
@@ -621,6 +644,7 @@ class AppState extends ChangeNotifier {
     };
     _loaded.add(topicId);
     notifyListeners();
+    final topic = _repository.getById(topicId);
     final submission = UserTierSubmission(
       id: '$_anonymousId-$topicId',
       topicId: topicId,
@@ -628,9 +652,9 @@ class AppState extends ChangeNotifier {
       createdAt: DateTime.now(),
       placements: _placements[topicId]!,
       region: _region,
+      contentLanguage: topic?.contentLanguage ?? _locale,
     );
     await _localStore.saveSubmission(submission);
-    final topic = _repository.getById(topicId);
     if (topic != null) {
       var submissions = [submission];
       if (_cloudRepository != null && _cloudTopicIds.contains(topicId)) {
@@ -973,13 +997,7 @@ class AppState extends ChangeNotifier {
     final user = _auth?.currentUser;
     if (user == null || user.isAnonymous || user.emailVerified) return true;
     try {
-      await _auth!.setLanguageCode(switch (_locale) {
-        AppLocale.ja => 'ja',
-        AppLocale.ko => 'ko',
-        AppLocale.zhTw => 'zh-TW',
-        AppLocale.ptBr => 'pt-BR',
-        AppLocale.en => 'en',
-      });
+      await _auth!.setLanguageCode(_locale.firebaseAuthCode);
       await user.sendEmailVerification();
       _cloudError = null;
       return true;

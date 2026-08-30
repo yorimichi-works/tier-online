@@ -7,6 +7,7 @@ import '../theme/app_theme.dart';
 import '../utils/app_breakpoints.dart';
 import '../widgets/common_widgets.dart';
 import '../widgets/tier_widgets.dart';
+import 'onboarding_overlay.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({
@@ -68,199 +69,211 @@ class _HomeScreenState extends State<HomeScreen> {
     final categories = {
       for (final topic in languageTopics) topic.categoryId,
     }.toList();
-    return SingleChildScrollView(
-      controller: widget.scrollController,
-      child: ContentFrame(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(24),
-              decoration: BoxDecoration(
-                gradient: const LinearGradient(
-                  colors: [Color(0xFF28223E), Color(0xFF172D35)],
-                ),
-                borderRadius: BorderRadius.circular(22),
-                border: Border.all(
-                  color: Theme.of(context).colorScheme.outline,
-                ),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    context.l10n.t('heroTitle'),
-                    style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w900,
-                      height: 1.2,
-                    ),
-                  ),
-                  const SizedBox(height: 9),
-                  Text(
-                    context.l10n.t('heroSubtitle'),
-                    style: const TextStyle(color: Color(0xFFC8CBD8)),
-                  ),
-                  const SizedBox(height: 19),
-                  LayoutBuilder(
-                    builder: (context, constraints) {
-                      const gap = 7.0;
-                      final badgeSize =
-                          ((constraints.maxWidth -
-                                      gap * (TierRank.values.length - 1)) /
-                                  TierRank.values.length)
-                              .clamp(28.0, 37.0);
-                      return Row(
-                        children: [
-                          for (
-                            var index = 0;
-                            index < TierRank.values.length;
-                            index++
-                          ) ...[
-                            if (index > 0) const SizedBox(width: gap),
-                            TierBadge(
-                              rank: TierRank.values[index],
-                              size: badgeSize,
-                            ),
-                          ],
-                        ],
-                      );
-                    },
-                  ),
-                  const SizedBox(height: 18),
-                  FilledButton.icon(
-                    onPressed: widget.onCreate,
-                    icon: const Icon(Icons.add_photo_alternate_rounded),
-                    label: Text(context.l10n.t('createFromImages')),
-                    style: FilledButton.styleFrom(
-                      minimumSize: const Size(210, 50),
-                      padding: const EdgeInsets.symmetric(horizontal: 22),
-                      backgroundColor: AppColors.purple,
-                      foregroundColor: Colors.white,
-                      textStyle: const TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w900,
-                      ),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(13),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 22),
-            TextField(
-              readOnly: true,
-              onTap: () => widget.onExplore(null),
-              decoration: InputDecoration(
-                prefixIcon: const Icon(Icons.search_rounded),
-                hintText: context.l10n.t('searchTitleTag'),
-              ),
-            ),
-            const SizedBox(height: 14),
-            SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              clipBehavior: Clip.none,
-              child: Row(
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.only(right: 7),
-                    child: CategoryFilterChip(
-                      label: context.l10n.t('all'),
-                      selected: _category == null,
-                      onTap: () => setState(() => _category = null),
-                    ),
-                  ),
-                  for (final category in categories)
-                    Padding(
-                      padding: const EdgeInsets.only(right: 7),
-                      child: CategoryFilterChip(
-                        label: context.l10n.categoryName(category),
-                        selected: _category == category,
-                        onTap: () => setState(() => _category = category),
-                      ),
-                    ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 13),
-            WorldLanguageFilter(
-              enabled: _viewWorldTiers,
-              selected: _languages,
-              onEnabledChanged: (value) => setState(() {
-                _viewWorldTiers = value;
-                if (_languages.isEmpty) {
-                  _languages.add(widget.appState.locale);
-                }
-              }),
-              onLanguageChanged: (locale, selected) => setState(() {
-                if (selected) {
-                  _languages.add(locale);
-                } else {
-                  _languages.remove(locale);
-                }
-              }),
-            ),
-            const SizedBox(height: 26),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.end,
+    return Stack(
+      children: [
+        SingleChildScrollView(
+          controller: widget.scrollController,
+          child: ContentFrame(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Expanded(
-                  child: SectionHeader(
-                    title: context.l10n.t('findInteresting'),
-                    subtitle: context.l10n.count('themeCount', shown.length),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(24),
+                  decoration: BoxDecoration(
+                    gradient: const LinearGradient(
+                      colors: [Color(0xFF28223E), Color(0xFF172D35)],
+                    ),
+                    borderRadius: BorderRadius.circular(22),
+                    border: Border.all(
+                      color: Theme.of(context).colorScheme.outline,
+                    ),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        context.l10n.t('heroTitle'),
+                        style: Theme.of(context).textTheme.headlineMedium
+                            ?.copyWith(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w900,
+                              height: 1.2,
+                            ),
+                      ),
+                      const SizedBox(height: 9),
+                      Text(
+                        context.l10n.t('heroSubtitle'),
+                        style: const TextStyle(color: Color(0xFFC8CBD8)),
+                      ),
+                      const SizedBox(height: 19),
+                      LayoutBuilder(
+                        builder: (context, constraints) {
+                          const gap = 7.0;
+                          final badgeSize =
+                              ((constraints.maxWidth -
+                                          gap * (TierRank.values.length - 1)) /
+                                      TierRank.values.length)
+                                  .clamp(28.0, 37.0);
+                          return Row(
+                            children: [
+                              for (
+                                var index = 0;
+                                index < TierRank.values.length;
+                                index++
+                              ) ...[
+                                if (index > 0) const SizedBox(width: gap),
+                                TierBadge(
+                                  rank: TierRank.values[index],
+                                  size: badgeSize,
+                                ),
+                              ],
+                            ],
+                          );
+                        },
+                      ),
+                      const SizedBox(height: 18),
+                      FilledButton.icon(
+                        onPressed: widget.onCreate,
+                        icon: const Icon(Icons.add_photo_alternate_rounded),
+                        label: Text(context.l10n.t('createFromImages')),
+                        style: FilledButton.styleFrom(
+                          minimumSize: const Size(210, 50),
+                          padding: const EdgeInsets.symmetric(horizontal: 22),
+                          backgroundColor: AppColors.purple,
+                          foregroundColor: Colors.white,
+                          textStyle: const TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w900,
+                          ),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(13),
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-                TopicViewModeToggle(
-                  density: _density,
-                  onChanged: (value) => setState(() => _density = value),
+                const SizedBox(height: 22),
+                TextField(
+                  readOnly: true,
+                  onTap: () => widget.onExplore(null),
+                  decoration: InputDecoration(
+                    prefixIcon: const Icon(Icons.search_rounded),
+                    hintText: context.l10n.t('searchTitleTag'),
+                  ),
+                ),
+                const SizedBox(height: 14),
+                SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  clipBehavior: Clip.none,
+                  child: Row(
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.only(right: 7),
+                        child: CategoryFilterChip(
+                          label: context.l10n.t('all'),
+                          selected: _category == null,
+                          onTap: () => setState(() => _category = null),
+                        ),
+                      ),
+                      for (final category in categories)
+                        Padding(
+                          padding: const EdgeInsets.only(right: 7),
+                          child: CategoryFilterChip(
+                            label: context.l10n.categoryName(category),
+                            selected: _category == category,
+                            onTap: () => setState(() => _category = category),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 13),
+                WorldLanguageFilter(
+                  enabled: _viewWorldTiers,
+                  selected: _languages,
+                  onEnabledChanged: (value) => setState(() {
+                    _viewWorldTiers = value;
+                    if (_languages.isEmpty) {
+                      _languages.add(widget.appState.locale);
+                    }
+                  }),
+                  onLanguageChanged: (locale, selected) => setState(() {
+                    if (selected) {
+                      _languages.add(locale);
+                    } else {
+                      _languages.remove(locale);
+                    }
+                  }),
+                ),
+                const SizedBox(height: 26),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Expanded(
+                      child: SectionHeader(
+                        title: context.l10n.t('findInteresting'),
+                        subtitle: context.l10n.count(
+                          'themeCount',
+                          shown.length,
+                        ),
+                      ),
+                    ),
+                    TopicViewModeToggle(
+                      density: _density,
+                      onChanged: (value) => setState(() => _density = value),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: _SortFilter(
+                    selected: _filter,
+                    onSelected: (value) => setState(() => _filter = value),
+                  ),
+                ),
+                const SizedBox(height: 14),
+                LayoutBuilder(
+                  builder: (context, constraints) {
+                    final columns = _density == TopicCardDensity.compact
+                        ? 1
+                        : AppBreakpoints.gridColumns(constraints.maxWidth);
+                    const gap = 13.0;
+                    final width =
+                        (constraints.maxWidth - gap * (columns - 1)) / columns;
+                    return Wrap(
+                      spacing: gap,
+                      runSpacing: gap,
+                      children: [
+                        for (final topic in shown)
+                          SizedBox(
+                            width: width,
+                            child: TopicCard(
+                              topic: topic,
+                              density: _density,
+                              liked: widget.appState.isTopicLiked(topic.id),
+                              onLike: () async {
+                                await widget.appState.toggleTopicLike(topic.id);
+                                if (mounted) setState(() {});
+                              },
+                              onTap: () => _open(topic),
+                            ),
+                          ),
+                      ],
+                    );
+                  },
                 ),
               ],
             ),
-            const SizedBox(height: 12),
-            SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: _SortFilter(
-                selected: _filter,
-                onSelected: (value) => setState(() => _filter = value),
-              ),
-            ),
-            const SizedBox(height: 14),
-            LayoutBuilder(
-              builder: (context, constraints) {
-                final columns = _density == TopicCardDensity.compact
-                    ? 1
-                    : AppBreakpoints.gridColumns(constraints.maxWidth);
-                const gap = 13.0;
-                final width =
-                    (constraints.maxWidth - gap * (columns - 1)) / columns;
-                return Wrap(
-                  spacing: gap,
-                  runSpacing: gap,
-                  children: [
-                    for (final topic in shown)
-                      SizedBox(
-                        width: width,
-                        child: TopicCard(
-                          topic: topic,
-                          density: _density,
-                          liked: widget.appState.isTopicLiked(topic.id),
-                          onLike: () async {
-                            await widget.appState.toggleTopicLike(topic.id);
-                            if (mounted) setState(() {});
-                          },
-                          onTap: () => _open(topic),
-                        ),
-                      ),
-                  ],
-                );
-              },
-            ),
-          ],
+          ),
         ),
-      ),
+        if (widget.appState.initialized &&
+            widget.appState.isAnonymous &&
+            !widget.appState.hasSeenOnboarding)
+          OnboardingOverlay(appState: widget.appState),
+      ],
     );
   }
 

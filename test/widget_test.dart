@@ -506,6 +506,7 @@ void main() {
       trustLocalSharedRoutes: true,
     );
     await appState.initialize();
+    await appState.markOnboardingSeen();
     await tester.pumpWidget(TierTableOnlineApp(appState: appState));
 
     final topic = find.text('最強の妖怪Tier').last;
@@ -552,6 +553,7 @@ void main() {
       trustLocalSharedRoutes: true,
     );
     await appState.initialize();
+    await appState.markOnboardingSeen();
     await tester.pumpWidget(TierTableOnlineApp(appState: appState));
 
     final topic = find.text('最強の妖怪Tier').last;

@@ -5,9 +5,9 @@ import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 
+import '../domain/internationalization.dart';
 import '../models/tier_models.dart';
 import '../models/tier_serialization.dart';
-import '../l10n/app_localizations.dart';
 import 'cloud_tier_repository.dart';
 import 'starter_tier_repository.dart';
 
@@ -60,7 +60,10 @@ class FirebaseTierRepository implements CloudTierRepository {
     if (data == null) return null;
     return (
       preferredLocale: data['preferredLocale'] as String? ?? 'ja',
-      region: data['region'] as String? ?? 'JP',
+      region: SupportedRegion.normalize(
+        data['region'] as String?,
+        fallback: 'JP',
+      ),
     );
   }
 
@@ -162,7 +165,10 @@ class FirebaseTierRepository implements CloudTierRepository {
       contentLanguage:
           AppLocaleParser.fromCode(data['contentLanguage'] as String?) ??
           AppLocale.ja,
-      targetRegion: data['targetRegion'] as String? ?? 'JP',
+      targetRegion: SupportedRegion.normalize(
+        data['targetRegion'] as String?,
+        fallback: 'JP',
+      ),
       categoryId:
           data['categoryId'] as String? ??
           TierCategory.fromLegacy(data['category'] as String? ?? ''),
@@ -319,6 +325,7 @@ class FirebaseTierRepository implements CloudTierRepository {
           (rank, items) => MapEntry(rank.name, items),
         ),
         'region': submission.region,
+        'contentLanguage': submission.contentLanguage.code,
       }, SetOptions(merge: true));
 
   @override
@@ -336,7 +343,15 @@ class FirebaseTierRepository implements CloudTierRepository {
           placements: _placementsFromFirestore(
             document.data()['placements'] as Map<String, dynamic>? ?? const {},
           ),
-          region: document.data()['region'] as String? ?? 'JP',
+          region: SupportedRegion.normalize(
+            document.data()['region'] as String?,
+            fallback: 'JP',
+          ),
+          contentLanguage:
+              AppLocaleParser.fromCode(
+                document.data()['contentLanguage'] as String?,
+              ) ??
+              AppLocale.ja,
         ),
     ];
   }

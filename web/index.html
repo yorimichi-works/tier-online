@@ -133,19 +133,28 @@
     crossorigin="anonymous"></script>
   <script>
     (() => {
-      const pathLocale = ['ja', 'ko', 'en', 'zh-tw', 'pt-br'].includes(location.pathname.split('/')[1])
-        ? location.pathname.split('/')[1]
+      // Flutter起動前にも言語を確定する必要があるため、Dartの
+      // InternationalizationConfigと同じcanonical codeだけをここに保持する。
+      const supportedLocales = Object.freeze(['ja', 'ko', 'en', 'zh-tw', 'pt-br']);
+      const hreflangByLocale = Object.freeze({
+        ja: 'ja', ko: 'ko', en: 'en', 'zh-tw': 'zh-Hant-TW', 'pt-br': 'pt-BR'
+      });
+      const pathSegment = location.pathname.split('/')[1];
+      const pathLocale = supportedLocales.includes(pathSegment)
+        ? pathSegment
         : null;
       const browserLocale = navigator.language || 'ja-JP';
       const localeParts = browserLocale.replace('_', '-').split('-');
       const language = localeParts[0].toLowerCase();
-      const region = localeParts.map((part) => part.toUpperCase()).find((part) => ['JP', 'KR', 'TW', 'BR'].includes(part)) || '';
+      const region = localeParts.map((part) => part.toUpperCase()).find(
+        (part) => ['JP', 'KR', 'TW', 'HK', 'BR'].includes(part)
+      ) || '';
       const traditionalChinese = localeParts.some((part) => part.toLowerCase() === 'hant');
       const detectedLocale = region === 'KR' || language === 'ko'
         ? 'ko'
         : region === 'JP' || language === 'ja'
           ? 'ja'
-          : region === 'TW' || (language === 'zh' && traditionalChinese)
+          : region === 'TW' || region === 'HK' || (language === 'zh' && traditionalChinese)
             ? 'zh-tw'
             : region === 'BR' || language === 'pt'
               ? 'pt-br'
@@ -197,15 +206,11 @@
       ogLocale.property = 'og:locale';
       ogLocale.content = meta.ogLocale;
       document.head.appendChild(ogLocale);
-      if (/^\/(ja|ko|en|zh-tw|pt-br)\/?$/.test(location.pathname)) {
-        for (const code of ['ja', 'ko', 'en', 'zh-tw', 'pt-br']) {
+      if (pathLocale && location.pathname.split('/').filter(Boolean).length === 1) {
+        for (const code of supportedLocales) {
           const link = document.createElement('link');
           link.rel = 'alternate';
-          link.hreflang = code === 'zh-tw'
-            ? 'zh-Hant-TW'
-            : code === 'pt-br'
-              ? 'pt-BR'
-              : code;
+          link.hreflang = hreflangByLocale[code];
           link.href = `${location.origin}/${code}/`;
           document.head.appendChild(link);
         }

@@ -1,12 +1,16 @@
 import {getFirestore} from "firebase-admin/firestore";
 import {onRequest} from "firebase-functions/v2/https";
+import {
+  hreflang,
+  isSupportedLocale,
+  localeFromAcceptLanguage,
+  SUPPORTED_LOCALES,
+  SupportedLocale,
+} from "./internationalization";
 
 const SITE_ORIGIN = "https://tier-online.web.app";
 
-const LOCALES = ["ja", "ko", "en", "zh-tw", "pt-br"] as const;
-type Locale = (typeof LOCALES)[number];
-
-const OG_LOCALE: Record<Locale, string> = {
+const OG_LOCALE: Record<SupportedLocale, string> = {
   ja: "ja_JP",
   ko: "ko_KR",
   "zh-tw": "zh_TW",
@@ -14,7 +18,7 @@ const OG_LOCALE: Record<Locale, string> = {
   en: "en_US",
 };
 
-const DEFAULT_META: Record<Locale, {title: string; description: string}> = {
+const DEFAULT_META: Record<SupportedLocale, {title: string; description: string}> = {
   ja: {
     title: "tier表オンライン｜無料でTier表を作成・共有",
     description: "無料でTier表を作成・共有。みんなのランキングと自分の結果を比べよう。",
@@ -40,24 +44,13 @@ const DEFAULT_META: Record<Locale, {title: string; description: string}> = {
 };
 
 const DEFAULT_IMAGE = `${SITE_ORIGIN}/icons/Icon-512.png`;
-const HOME_IMAGE: Record<Locale, string> = {
+const HOME_IMAGE: Record<SupportedLocale, string> = {
   ja: `${SITE_ORIGIN}/og-image-ja.png`,
   ko: `${SITE_ORIGIN}/og-image-ko.png`,
   "zh-tw": `${SITE_ORIGIN}/og-image-en.png`,
   "pt-br": `${SITE_ORIGIN}/og-image-en.png`,
   en: `${SITE_ORIGIN}/og-image-en.png`,
 };
-
-function localeFromAcceptLanguage(header: string | undefined): Locale {
-  if (!header) return "ja";
-  const primary = header.split(",")[0]?.trim().toLowerCase() ?? "";
-  if (primary.startsWith("ko")) return "ko";
-  if (primary.startsWith("ja")) return "ja";
-  if (primary.startsWith("zh-tw") || primary.startsWith("zh-hant")) return "zh-tw";
-  if (primary.startsWith("pt")) return "pt-br";
-  if (primary.startsWith("en")) return "en";
-  return "ja";
-}
 
 function escapeHtml(value: string): string {
   return value
@@ -68,10 +61,8 @@ function escapeHtml(value: string): string {
     .replace(/'/g, "&#39;");
 }
 
-function parseLocale(value: string | undefined): Locale {
-  return (LOCALES as readonly string[]).includes(value ?? "")
-    ? (value as Locale)
-    : "ja";
+function parseLocale(value: string | undefined): SupportedLocale {
+  return isSupportedLocale(value) ? value : "ja";
 }
 
 function renderShell(head: string): string {
@@ -95,12 +86,6 @@ ${head}
 </html>`;
 }
 
-function hreflang(locale: Locale): string {
-  if (locale === "zh-tw") return "zh-Hant-TW";
-  if (locale === "pt-br") return "pt-BR";
-  return locale;
-}
-
 // ルート("/")および対応言語配下(tier個別ページを除く)の共有プレビュー用。
 // SNS/検索エンジンのクローラーはJavaScriptを実行しないため、静的index.html
 // に埋め込んだメタタグは常に固定言語になってしまう。このハンドラで言語ごとに
@@ -108,14 +93,14 @@ function hreflang(locale: Locale): string {
 // flutter_bootstrap.jsでアプリ本体を読み込ませる。
 export const renderHome = onRequest(async (req, res) => {
   const segments = req.path.split("/").filter(Boolean);
-  const pathLocale = (LOCALES as readonly string[]).includes(segments[0] ?? "")
-    ? (segments[0] as Locale)
+  const pathLocale = isSupportedLocale(segments[0])
+    ? segments[0]
     : null;
   const locale = pathLocale ?? localeFromAcceptLanguage(req.get("accept-language"));
   const meta = DEFAULT_META[locale];
   const canonical = `${SITE_ORIGIN}/${locale}/`;
 
-  const alternates = LOCALES.map(
+  const alternates = SUPPORTED_LOCALES.map(
     (code) => `  <link rel="alternate" hreflang="${hreflang(code)}" href="${SITE_ORIGIN}/${code}/">`,
   ).join("\n");
 
@@ -181,7 +166,7 @@ export const renderTopic = onRequest(async (req, res) => {
   );
   const canonical = `${SITE_ORIGIN}/${locale}/tier/${topicId}`;
 
-  const alternates = LOCALES.map(
+  const alternates = SUPPORTED_LOCALES.map(
     (code) =>
       `  <link rel="alternate" hreflang="${hreflang(code)}" href="${SITE_ORIGIN}/${code}/tier/${topicId}">`,
   ).join("\n");
@@ -212,7 +197,7 @@ export const sitemap = onRequest(async (_req, res) => {
     .select("contentLanguage")
     .get();
 
-  const staticPaths = LOCALES.flatMap((locale) => [
+  const staticPaths = SUPPORTED_LOCALES.flatMap((locale) => [
     `/${locale}/`,
     `/${locale}/search`,
   ]);

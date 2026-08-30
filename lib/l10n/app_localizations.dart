@@ -1,99 +1,17 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
-enum AppLocale { ja, ko, en, zhTw, ptBr }
+import '../domain/internationalization.dart';
 
-extension AppLocaleValues on AppLocale {
-  String get code => switch (this) {
-    AppLocale.zhTw => 'zh-tw',
-    AppLocale.ptBr => 'pt-br',
-    _ => name,
-  };
-
-  String get nativeName => switch (this) {
-    AppLocale.ja => '日本語',
-    AppLocale.ko => '한국어',
-    AppLocale.zhTw => '繁體中文',
-    AppLocale.ptBr => 'Português',
-    AppLocale.en => 'English',
-  };
-
-  Locale get flutterLocale => switch (this) {
-    AppLocale.zhTw => const Locale.fromSubtags(
-      languageCode: 'zh',
-      scriptCode: 'Hant',
-      countryCode: 'TW',
-    ),
-    AppLocale.ptBr => const Locale('pt', 'BR'),
-    _ => Locale(code),
-  };
-
-  String get serviceName => switch (this) {
-    AppLocale.ja => 'tier表オンライン',
-    AppLocale.ko => '티어표 온라인',
-    AppLocale.zhTw => 'Tier 表線上版',
-    AppLocale.ptBr => 'Tier Online',
-    AppLocale.en => 'Tier Online',
-  };
-
-  String get defaultRegion => switch (this) {
-    AppLocale.ja => 'JP',
-    AppLocale.ko => 'KR',
-    AppLocale.zhTw => 'TW',
-    AppLocale.ptBr => 'BR',
-    AppLocale.en => 'GLOBAL',
-  };
-}
-
-abstract final class AppLocaleParser {
-  static AppLocale? fromCode(String? value) {
-    final normalized = value?.toLowerCase().replaceAll('_', '-');
-    if (normalized == 'zh' ||
-        normalized == 'zh-tw' ||
-        normalized == 'zh-hant') {
-      return AppLocale.zhTw;
-    }
-    if (normalized == 'pt' || normalized == 'pt-br') {
-      return AppLocale.ptBr;
-    }
-    for (final locale in AppLocale.values) {
-      if (locale.code == normalized) return locale;
-    }
-    return null;
-  }
-
-  static AppLocale? fromPath(String path) {
-    final segments = Uri.tryParse(path)?.pathSegments ?? const <String>[];
-    return segments.isEmpty ? null : fromCode(segments.first);
-  }
-
-  static AppLocale fromDevice(Locale locale) {
-    final language = locale.languageCode.toLowerCase();
-    final region = locale.countryCode?.toUpperCase();
-    final script = locale.scriptCode?.toLowerCase();
-    if (region == 'KR' || language == 'ko') return AppLocale.ko;
-    if (region == 'JP' || language == 'ja') return AppLocale.ja;
-    if (region == 'TW' || script == 'hant') return AppLocale.zhTw;
-    if (region == 'BR' || language == 'pt') return AppLocale.ptBr;
-    return AppLocale.en;
-  }
-}
+export '../domain/internationalization.dart';
 
 class AppLocalizations {
   const AppLocalizations(this.locale);
   final AppLocale locale;
 
-  static const supportedLocales = [
-    Locale('ja'),
-    Locale('ko'),
-    Locale.fromSubtags(
-      languageCode: 'zh',
-      scriptCode: 'Hant',
-      countryCode: 'TW',
-    ),
-    Locale('pt', 'BR'),
-    Locale('en'),
-  ];
+  static final supportedLocales = InternationalizationConfig.localeProfiles
+      .map((profile) => profile.flutterLocale)
+      .toList(growable: false);
   static const delegate = _AppLocalizationsDelegate();
 
   static AppLocalizations of(BuildContext context) =>
@@ -199,6 +117,9 @@ class AppLocalizations {
       'japan': '日本',
       'korea': '韓国',
       'taiwan': '台湾',
+      'hongKong': '香港',
+      'unitedStates': 'アメリカ',
+      'unitedKingdom': 'イギリス',
       'brazil': 'ブラジル',
       'globalOther': 'グローバル／その他',
       'notSignedIn': 'ログインしていません',
@@ -549,6 +470,9 @@ class AppLocalizations {
       'japan': '일본',
       'korea': '한국',
       'taiwan': '대만',
+      'hongKong': '홍콩',
+      'unitedStates': '미국',
+      'unitedKingdom': '영국',
       'brazil': '브라질',
       'globalOther': '글로벌 / 기타',
       'notSignedIn': '로그인하지 않았습니다',
@@ -899,6 +823,9 @@ class AppLocalizations {
       'japan': '日本',
       'korea': '韓國',
       'taiwan': '台灣',
+      'hongKong': '香港',
+      'unitedStates': '美國',
+      'unitedKingdom': '英國',
       'brazil': '巴西',
       'globalOther': '全球／其他',
       'notSignedIn': '尚未登入',
@@ -1246,6 +1173,9 @@ class AppLocalizations {
       'japan': 'Japão',
       'korea': 'Coreia do Sul',
       'taiwan': 'Taiwan',
+      'hongKong': 'Hong Kong',
+      'unitedStates': 'Estados Unidos',
+      'unitedKingdom': 'Reino Unido',
       'brazil': 'Brasil',
       'globalOther': 'Global / Outros',
       'notSignedIn': 'Você não está conectado',
@@ -1628,6 +1558,9 @@ class AppLocalizations {
       'japan': 'Japan',
       'korea': 'Korea',
       'taiwan': 'Taiwan',
+      'hongKong': 'Hong Kong',
+      'unitedStates': 'United States',
+      'unitedKingdom': 'United Kingdom',
       'brazil': 'Brazil',
       'globalOther': 'Global / Other',
       'notSignedIn': 'Not signed in',

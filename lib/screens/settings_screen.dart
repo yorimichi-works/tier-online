@@ -196,26 +196,11 @@ class SettingsScreen extends StatelessWidget {
                   title: Text(context.l10n.t('region')),
                   value: appState.region,
                   items: [
-                    DropdownMenuItem(
-                      value: 'JP',
-                      child: Text(context.l10n.t('japan')),
-                    ),
-                    DropdownMenuItem(
-                      value: 'KR',
-                      child: Text(context.l10n.t('korea')),
-                    ),
-                    DropdownMenuItem(
-                      value: 'TW',
-                      child: Text(context.l10n.t('taiwan')),
-                    ),
-                    DropdownMenuItem(
-                      value: 'BR',
-                      child: Text(context.l10n.t('brazil')),
-                    ),
-                    DropdownMenuItem(
-                      value: 'GLOBAL',
-                      child: Text(context.l10n.t('globalOther')),
-                    ),
+                    for (final region in SupportedRegion.values)
+                      DropdownMenuItem(
+                        value: region.code,
+                        child: Text(context.l10n.t(region.localizationKey)),
+                      ),
                   ],
                   onChanged: (value) {
                     if (value != null) appState.setRegion(value);
