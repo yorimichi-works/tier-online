@@ -76,6 +76,7 @@ class _AppShellState extends State<AppShell> {
       ),
     ];
     return AppScaffold(
+      appState: widget.appState,
       index: _index,
       onSelected: (value) => setState(() {
         if (value == 2 && _index != 2) _editingTopic = null;

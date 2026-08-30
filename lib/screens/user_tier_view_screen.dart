@@ -48,7 +48,8 @@ class UserTierViewScreen extends StatelessWidget {
                     TierRowView(
                       rank: rank,
                       items: [
-                        for (final id in submission.placements[rank] ?? const [])
+                        for (final id
+                            in submission.placements[rank] ?? const [])
                           if (_item(id) != null) _item(id)!,
                       ],
                     ),

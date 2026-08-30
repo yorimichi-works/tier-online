@@ -1,4 +1,5 @@
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_app_check/firebase_app_check.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart';
 
@@ -24,6 +25,9 @@ abstract final class FirebaseBootstrap {
   static const _storageBucket = String.fromEnvironment(
     'FIREBASE_STORAGE_BUCKET',
   );
+  static const _appCheckWebSiteKey = String.fromEnvironment(
+    'FIREBASE_APP_CHECK_WEB_SITE_KEY',
+  );
 
   static bool get _environmentConfigured =>
       _apiKey.isNotEmpty &&
@@ -48,6 +52,11 @@ abstract final class FirebaseBootstrap {
     if (!configured) return const FirebaseBootstrapResult();
     try {
       await Firebase.initializeApp(options: _options);
+      if (kIsWeb && _appCheckWebSiteKey.isNotEmpty) {
+        await FirebaseAppCheck.instance.activate(
+          providerWeb: ReCaptchaV3Provider(_appCheckWebSiteKey),
+        );
+      }
       final auth = FirebaseAuth.instance;
       if (auth.currentUser == null) {
         await auth.signInAnonymously();

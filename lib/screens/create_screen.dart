@@ -45,6 +45,7 @@ class _CreateScreenState extends State<CreateScreen> {
   bool _searchingImages = false;
   bool _showExistingTopics = false;
   bool _showTemplates = false;
+  bool _shareUploadedImages = false;
   int _existingFilter = 0;
   String _existingQuery = '';
   String? _sourceTierId;
@@ -66,6 +67,7 @@ class _CreateScreenState extends State<CreateScreen> {
     _category = topic.categoryId;
     _sourceTierId = topic.sourceTierId;
     _sourceTemplateId = topic.sourceTemplateId;
+    _shareUploadedImages = topic.shareUploadedImages;
     _items
       ..clear()
       ..addAll([
@@ -640,6 +642,7 @@ class _CreateScreenState extends State<CreateScreen> {
       isLanguageNeutral: items.every((item) => item.isLanguageNeutral),
       likeCount: editingTopic?.likeCount ?? 0,
       isPublic: editingTopic?.isPublic ?? true,
+      shareUploadedImages: _shareUploadedImages,
     );
     if (!mounted) return;
     Navigator.of(context).push(
@@ -1229,6 +1232,19 @@ class _CreateScreenState extends State<CreateScreen> {
             ),
           ],
           const SizedBox(height: 18),
+          CheckboxListTile(
+            value: _shareUploadedImages,
+            onChanged: (value) =>
+                setState(() => _shareUploadedImages = value ?? false),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+            controlAffinity: ListTileControlAffinity.leading,
+            title: Text(
+              context.l10n.t('shareUploadedImages'),
+              style: const TextStyle(fontWeight: FontWeight.w800),
+            ),
+            subtitle: Text(context.l10n.t('shareUploadedImagesHelp')),
+          ),
+          const SizedBox(height: 8),
           Card(
             child: Padding(
               padding: const EdgeInsets.all(13),
@@ -1389,6 +1405,112 @@ List<_QuickTierTemplate> _quickTemplates(AppLocale locale) => switch (locale) {
         '🍛 카레',
         '🌮 타코',
         '🍰 케이크',
+      ],
+    ),
+  ],
+  AppLocale.zhTw => const [
+    _QuickTierTemplate(
+      id: 'animals',
+      icon: '🐾',
+      title: '動物 Tier',
+      tags: ['動物', '生物'],
+      categoryId: 'other',
+      cards: [
+        '🐶 狗',
+        '🐱 貓',
+        '🦁 獅子',
+        '🐼 熊貓',
+        '🐘 大象',
+        '🐧 企鵝',
+        '🐬 海豚',
+        '🦉 貓頭鷹',
+      ],
+    ),
+    _QuickTierTemplate(
+      id: 'countries',
+      icon: '🌍',
+      title: '國家 Tier',
+      tags: ['國家', '世界'],
+      categoryId: 'lifestyle',
+      cards: [
+        '🇹🇼 台灣',
+        '🇯🇵 日本',
+        '🇰🇷 韓國',
+        '🇺🇸 美國',
+        '🇫🇷 法國',
+        '🇧🇷 巴西',
+        '🇮🇳 印度',
+        '🇦🇺 澳洲',
+      ],
+    ),
+    _QuickTierTemplate(
+      id: 'food',
+      icon: '🍽️',
+      title: '美食 Tier',
+      tags: ['美食', '料理'],
+      categoryId: 'food',
+      cards: [
+        '🍕 披薩',
+        '🍣 壽司',
+        '🍔 漢堡',
+        '🍜 拉麵',
+        '🥗 沙拉',
+        '🍛 咖哩',
+        '🌮 塔可',
+        '🍰 蛋糕',
+      ],
+    ),
+  ],
+  AppLocale.ptBr => const [
+    _QuickTierTemplate(
+      id: 'animals',
+      icon: '🐾',
+      title: 'Tier de animais',
+      tags: ['animais', 'natureza'],
+      categoryId: 'other',
+      cards: [
+        '🐶 Cachorro',
+        '🐱 Gato',
+        '🦁 Leão',
+        '🐼 Panda',
+        '🐘 Elefante',
+        '🐧 Pinguim',
+        '🐬 Golfinho',
+        '🦉 Coruja',
+      ],
+    ),
+    _QuickTierTemplate(
+      id: 'countries',
+      icon: '🌍',
+      title: 'Tier de países',
+      tags: ['países', 'mundo'],
+      categoryId: 'lifestyle',
+      cards: [
+        '🇧🇷 Brasil',
+        '🇵🇹 Portugal',
+        '🇺🇸 Estados Unidos',
+        '🇯🇵 Japão',
+        '🇰🇷 Coreia do Sul',
+        '🇫🇷 França',
+        '🇮🇳 Índia',
+        '🇦🇺 Austrália',
+      ],
+    ),
+    _QuickTierTemplate(
+      id: 'food',
+      icon: '🍽️',
+      title: 'Tier de comidas',
+      tags: ['comida', 'favoritos'],
+      categoryId: 'food',
+      cards: [
+        '🍕 Pizza',
+        '🍣 Sushi',
+        '🍔 Hambúrguer',
+        '🍜 Macarrão',
+        '🥗 Salada',
+        '🍛 Curry',
+        '🌮 Taco',
+        '🍰 Bolo',
       ],
     ),
   ],

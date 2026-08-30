@@ -29,6 +29,7 @@ enum _MyTierSection { created, joined }
 class _MyTierScreenState extends State<MyTierScreen> {
   _MyTierSection _section = _MyTierSection.created;
   TopicCardDensity _density = TopicCardDensity.full;
+  final Set<String> _deletingTopicIds = {};
 
   Future<void> _deleteTopic(BuildContext context, TierTopic topic) async {
     final confirmed = await showDialog<bool>(
@@ -51,7 +52,18 @@ class _MyTierScreenState extends State<MyTierScreen> {
         ],
       ),
     );
-    if (confirmed == true) await widget.appState.deleteOwnTopic(topic);
+    if (confirmed != true || !mounted) return;
+    setState(() => _deletingTopicIds.add(topic.id));
+    final deleted = await widget.appState.deleteOwnTopic(topic);
+    if (!mounted || !context.mounted) return;
+    setState(() => _deletingTopicIds.remove(topic.id));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          context.l10n.t(deleted ? 'deleteTierSuccess' : 'deleteTierFailure'),
+        ),
+      ),
+    );
   }
 
   Future<void> _makePrivate(BuildContext context, TierTopic topic) async {
@@ -229,8 +241,15 @@ class _MyTierScreenState extends State<MyTierScreen> {
                                           ),
                                         ),
                                         OutlinedButton.icon(
-                                          onPressed: () =>
-                                              _deleteTopic(context, topic),
+                                          onPressed:
+                                              _deletingTopicIds.contains(
+                                                topic.id,
+                                              )
+                                              ? null
+                                              : () => _deleteTopic(
+                                                  context,
+                                                  topic,
+                                                ),
                                           icon: const Icon(
                                             Icons.delete_outline_rounded,
                                           ),

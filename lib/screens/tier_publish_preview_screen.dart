@@ -7,6 +7,8 @@ import '../services/app_state.dart';
 import '../services/rewarded_ad_service.dart';
 import '../widgets/common_widgets.dart';
 import '../widgets/tier_widgets.dart';
+import 'account_sheet.dart';
+import 'email_verification_pending_screen.dart';
 import 'tier_builder_screen.dart';
 import 'tier_result_screen.dart';
 
@@ -34,8 +36,29 @@ class _TierPublishPreviewScreenState extends State<TierPublishPreviewScreen> {
   TierItem _item(String id) =>
       widget.topic.items.firstWhere((item) => item.id == id);
 
+  Future<bool> _ensureRegisteredAccount() async {
+    if (!widget.appState.authEnabled) return true;
+    if (widget.appState.isAnonymous) {
+      final authenticated = await showAccountSheet(context, widget.appState);
+      if (!mounted || !authenticated) return false;
+    }
+    if (widget.appState.needsEmailVerification) {
+      final verified = await Navigator.of(context).push<bool>(
+        MaterialPageRoute<bool>(
+          builder: (_) =>
+              EmailVerificationPendingScreen(appState: widget.appState),
+        ),
+      );
+      if (!mounted || verified != true) return false;
+    }
+    return !widget.appState.isAnonymous &&
+        !widget.appState.needsEmailVerification;
+  }
+
   Future<void> _publish() async {
     if (_publishing) return;
+    if (!await _ensureRegisteredAccount()) return;
+    if (!mounted) return;
     setState(() => _publishing = true);
     try {
       await widget.appState.addTopic(widget.topic, widget.placements);
@@ -245,10 +268,32 @@ class _TierPublishPreviewScreenState extends State<TierPublishPreviewScreen> {
               ),
             ),
             const SizedBox(height: 20),
+            if (widget.appState.authEnabled && widget.appState.isAnonymous) ...[
+              Container(
+                width: double.infinity,
+                margin: const EdgeInsets.only(bottom: 12),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.primaryContainer,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(
+                  context.l10n.t('accountRequiredToCreateTier'),
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.onPrimaryContainer,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ],
             PrimaryButton(
               label: _publishing
                   ? context.l10n.t('publishing')
-                  : context.l10n.t('publish'),
+                  : context.l10n.t(
+                      widget.appState.authEnabled && widget.appState.isAnonymous
+                          ? 'saveAndCreateAccount'
+                          : 'publish',
+                    ),
               icon: Icons.public_rounded,
               onPressed: _publishing ? null : _publish,
             ),

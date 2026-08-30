@@ -2,6 +2,8 @@ import 'dart:async';
 
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart'
+    show TargetPlatform, defaultTargetPlatform, kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -58,6 +60,23 @@ enum AuthResultStatus {
   generic,
 }
 
+enum AccountDeletionStatus { success, cancelled, wrongPassword, failed }
+
+enum GoogleAuthRecovery { signInExistingGoogle, linkDifferentProvider, none }
+
+@visibleForTesting
+GoogleAuthRecovery googleAuthRecoveryForErrorCode(
+  String code,
+) => switch (code) {
+  // Linking an anonymous user fails with this code when the selected Google
+  // credential already belongs to an existing Firebase user. This is a normal
+  // returning-user sign-in, not an email/password account conflict.
+  'credential-already-in-use' => GoogleAuthRecovery.signInExistingGoogle,
+  'email-already-in-use' || 'account-exists-with-different-credential' =>
+    GoogleAuthRecovery.linkDifferentProvider,
+  _ => GoogleAuthRecovery.none,
+};
+
 class AuthResult {
   const AuthResult(this.status);
   final AuthResultStatus status;
@@ -78,6 +97,28 @@ class AuthResult {
   }
 }
 
+@immutable
+class AuthSessionState {
+  const AuthSessionState._({required this.isRegistered, this.email});
+
+  const AuthSessionState.guest() : this._(isRegistered: false);
+
+  const AuthSessionState.registered({String? email})
+    : this._(isRegistered: true, email: email);
+
+  factory AuthSessionState.fromFirebaseUser(User? user) {
+    if (user == null || user.isAnonymous) {
+      return const AuthSessionState.guest();
+    }
+    return AuthSessionState.registered(email: user.email);
+  }
+
+  final bool isRegistered;
+  final String? email;
+
+  bool get isGuest => !isRegistered;
+}
+
 class AppState extends ChangeNotifier {
   AppState(
     this._repository, {
@@ -87,15 +128,16 @@ class AppState extends ChangeNotifier {
     TierAggregationService aggregationService = const TierAggregationService(),
     String initialPath = '/',
     Locale deviceLocale = const Locale('ja'),
+    bool trustLocalSharedRoutes = false,
   }) : _localStore = localStore ?? LocalTierStore(),
        _cloudRepository = cloudRepository,
        _auth = auth,
+       _cloudBootstrapComplete = cloudRepository != null,
        _aggregationService = aggregationService,
        _initialPath = initialPath,
-       _deviceLocale = deviceLocale {
-    if (_auth != null) {
-      _authSubscription = _auth!.userChanges().listen((_) => notifyListeners());
-    }
+       _deviceLocale = deviceLocale,
+       _trustLocalSharedRoutes = trustLocalSharedRoutes {
+    _listenToAuthChanges();
   }
   final TierRepository _repository;
   final LocalTierStore _localStore;
@@ -105,6 +147,7 @@ class AppState extends ChangeNotifier {
   final TierAggregationService _aggregationService;
   final String _initialPath;
   final Locale _deviceLocale;
+  final bool _trustLocalSharedRoutes;
   final Map<String, Map<TierRank, List<String>>> _placements = {};
   final Map<String, List<TalkPost>> _localTalks = {};
   final Set<String> _loaded = {};
@@ -115,6 +158,7 @@ class AppState extends ChangeNotifier {
   final Set<String> _reportedTopicIds = {};
   String _anonymousId = '';
   bool _initialized = false;
+  bool _cloudBootstrapComplete;
   Object? _cloudError;
   ThemeMode _themeMode = ThemeMode.dark;
   bool _animationsEnabled = true;
@@ -122,11 +166,23 @@ class AppState extends ChangeNotifier {
   String _region = 'JP';
 
   bool get initialized => _initialized;
+  bool get cloudBootstrapComplete => _cloudBootstrapComplete;
   bool get cloudEnabled => _cloudRepository != null;
+  bool get trustLocalSharedRoutes => _trustLocalSharedRoutes;
   Object? get cloudError => _cloudError;
+
   bool get authEnabled => _auth != null;
-  bool get isAnonymous => _auth?.currentUser?.isAnonymous ?? true;
-  String? get userEmail => _auth?.currentUser?.email;
+  AuthSessionState get authSession =>
+      AuthSessionState.fromFirebaseUser(_auth?.currentUser);
+  bool get isAnonymous => authSession.isGuest;
+  String? get userEmail => authSession.email;
+  bool get accountUsesPassword {
+    final providers = _auth?.currentUser?.providerData
+        .map((provider) => provider.providerId)
+        .toSet();
+    return providers?.contains('password') == true &&
+        providers?.contains('google.com') != true;
+  }
 
   /// メール確認が必要なのに未確認のアカウントか(匿名・Google確認済みは対象外)。
   bool get needsEmailVerification {
@@ -143,17 +199,102 @@ class AppState extends ChangeNotifier {
   String get currentUserName => switch (_locale) {
     AppLocale.ja => 'あなた',
     AppLocale.ko => '나',
+    AppLocale.zhTw => '你',
+    AppLocale.ptBr => 'Você',
     AppLocale.en => 'You',
   };
   String get anonymousId => _anonymousId;
+  String get currentDataUserId =>
+      _cloudRepository?.currentUserId ?? _anonymousId;
+
+  void _listenToAuthChanges() {
+    final auth = _auth;
+    if (auth == null) return;
+    // userChanges includes authStateChanges and also reacts to user reloads,
+    // so every screen observes the same Firebase Auth session after sign-in,
+    // sign-out, page reload, and profile/token refreshes.
+    _authSubscription = auth.userChanges().listen((_) => notifyListeners());
+  }
+
+  void completeCloudBootstrap() {
+    if (_cloudBootstrapComplete) return;
+    _cloudBootstrapComplete = true;
+    notifyListeners();
+  }
 
   List<TierTopic> get topics => _repository.getAll();
+  TierTopic? topicById(String topicId) => _repository.getById(topicId);
   List<TierTopic> get publicTopics =>
       topics.where((topic) => topic.isPublic).toList(growable: false);
   Map<TierRank, List<String>> placementsFor(String topicId) => {
     for (final rank in TierRank.values)
       rank: List.unmodifiable(_placements[topicId]?[rank] ?? const []),
   };
+
+  Future<TierTopic?> loadTopicById(String topicId) async {
+    final existing = _repository.getById(topicId);
+    // Bundled starter tiers are local assets and do not have a Firestore
+    // document. Every other shared URL must be revalidated against the cloud;
+    // otherwise a deleted/private topic can survive in local storage.
+    if (topicId.startsWith('starter-')) return existing;
+    final cloudRepository = _cloudRepository;
+    if (cloudRepository == null) return null;
+    try {
+      final topic = await cloudRepository.loadTopic(topicId);
+      if (topic != null) {
+        _cloudTopicIds.add(topic.id);
+        _repository.add(topic);
+        await _localStore.saveTopic(topic);
+      } else {
+        await evictCachedTopic(topicId);
+      }
+      _cloudError = null;
+      notifyListeners();
+      return topic;
+    } on Object catch (error) {
+      _cloudError = error;
+      notifyListeners();
+      rethrow;
+    }
+  }
+
+  /// Removes only the device-side copy. Used after Firestore confirms that a
+  /// shared topic was deleted, made private, or blocked.
+  Future<void> evictCachedTopic(String topicId) async {
+    if (topicId.startsWith('starter-')) return;
+    _repository.remove(topicId);
+    _cloudTopicIds.remove(topicId);
+    _placements.remove(topicId);
+    _localTalks.remove(topicId);
+    _loaded.remove(topicId);
+    _likedTopicIds.remove(topicId);
+    _talkReactions.removeWhere((key, _) => key.startsWith('$topicId|'));
+    _reportedTalkTargets.removeWhere((key) => key.startsWith('$topicId|'));
+    _reportedTopicIds.remove(topicId);
+    await _localStore.deleteTopic(topicId);
+    final preferences = await SharedPreferences.getInstance();
+    await Future.wait([
+      preferences.setStringList(
+        'likedTopicIds',
+        _likedTopicIds.toList(growable: false),
+      ),
+      preferences.setStringList(
+        'talkReactions',
+        _talkReactions.entries
+            .map((entry) => '${entry.key}=${entry.value}')
+            .toList(growable: false),
+      ),
+      preferences.setStringList(
+        'reportedTalkTargets',
+        _reportedTalkTargets.toList(growable: false),
+      ),
+      preferences.setStringList(
+        'reportedTopicIds',
+        _reportedTopicIds.toList(growable: false),
+      ),
+    ]);
+    notifyListeners();
+  }
 
   bool hasSubmitted(String topicId) =>
       _placements[topicId]?.values.any((items) => items.isNotEmpty) ?? false;
@@ -298,7 +439,7 @@ class AppState extends ChangeNotifier {
     await _authSubscription?.cancel();
     _cloudRepository = cloudRepository;
     _auth = auth;
-    _authSubscription = auth.userChanges().listen((_) => notifyListeners());
+    _listenToAuthChanges();
 
     try {
       final preferences = await SharedPreferences.getInstance();
@@ -376,12 +517,16 @@ class AppState extends ChangeNotifier {
 
   bool isTopicLiked(String topicId) => _likedTopicIds.contains(topicId);
 
-  bool isOwnTopic(TierTopic topic) =>
-      topic.creatorName == currentUserName ||
-      const {'あなた', '나', 'You'}.contains(topic.creatorName) ||
-      topic.id.startsWith('local-') ||
-      (_cloudRepository != null &&
-          topic.creatorId == _cloudRepository!.currentUserId);
+  bool isOwnTopic(TierTopic topic) {
+    final creatorId = topic.creatorId;
+    if (creatorId != null || _cloudTopicIds.contains(topic.id)) {
+      return _cloudRepository != null &&
+          creatorId == _cloudRepository!.currentUserId;
+    }
+    return topic.id.startsWith('local-') ||
+        topic.creatorName == currentUserName ||
+        const {'あなた', '나', 'You'}.contains(topic.creatorName);
+  }
 
   Future<void> toggleTopicLike(String topicId) async {
     final topic = _repository.getById(topicId);
@@ -543,19 +688,51 @@ class AppState extends ChangeNotifier {
     }
   }
 
-  Future<void> deleteOwnTopic(TierTopic topic) async {
-    if (!isOwnTopic(topic)) return;
-    if (_cloudRepository != null && _cloudTopicIds.contains(topic.id)) {
-      await _cloudRepository!.deleteTopic(topic.id);
-      _cloudTopicIds.remove(topic.id);
+  Future<bool> deleteOwnTopic(TierTopic topic) async {
+    if (!isOwnTopic(topic)) return false;
+    try {
+      if (_cloudRepository != null && _cloudTopicIds.contains(topic.id)) {
+        await _cloudRepository!.deleteTopic(topic.id);
+        _cloudTopicIds.remove(topic.id);
+      }
+    } on Object catch (error) {
+      _cloudError = error;
+      notifyListeners();
+      return false;
     }
     _repository.remove(topic.id);
     _placements.remove(topic.id);
     _localTalks.remove(topic.id);
     _loaded.remove(topic.id);
     _likedTopicIds.remove(topic.id);
+    _talkReactions.removeWhere((key, _) => key.startsWith('${topic.id}|'));
+    _reportedTalkTargets.removeWhere((key) => key.startsWith('${topic.id}|'));
+    _reportedTopicIds.remove(topic.id);
     await _localStore.deleteTopic(topic.id);
+    final preferences = await SharedPreferences.getInstance();
+    await Future.wait([
+      preferences.setStringList(
+        'likedTopicIds',
+        _likedTopicIds.toList(growable: false),
+      ),
+      preferences.setStringList(
+        'talkReactions',
+        _talkReactions.entries
+            .map((entry) => '${entry.key}=${entry.value}')
+            .toList(growable: false),
+      ),
+      preferences.setStringList(
+        'reportedTalkTargets',
+        _reportedTalkTargets.toList(growable: false),
+      ),
+      preferences.setStringList(
+        'reportedTopicIds',
+        _reportedTopicIds.toList(growable: false),
+      ),
+    ]);
+    _cloudError = null;
     notifyListeners();
+    return true;
   }
 
   Future<void> postTalk(
@@ -574,7 +751,7 @@ class AppState extends ChangeNotifier {
         rank: rank,
         minutesAgo: 0,
         createdAt: DateTime.now(),
-        authorUserId: attachOwnTier ? _anonymousId : null,
+        authorUserId: currentDataUserId,
         attachedTier: attachOwnTier,
       ),
     );
@@ -611,6 +788,7 @@ class AppState extends ChangeNotifier {
       body: body,
       createdAt: DateTime.now(),
       stance: stance,
+      authorUserId: currentDataUserId,
     );
     local[index] = post.copyWith(
       replies: parentReplyId == null
@@ -788,9 +966,9 @@ class AppState extends ChangeNotifier {
     }
   }
 
-  /// 現在の言語(ja/ko/en)をFirebase Authへ設定してから確認メールを送る。
-  /// 匿名または既に確認済みの場合は何もしない(送信失敗はアカウント作成の
-  /// 成功自体を損なわないよう、呼び出し元では別途エラー表示のみ行う)。
+  /// Firebase Authenticationの標準メールを現在の表示言語で送る。
+  /// 独自Action URLの更新制限が解除されたら、送信方式を変えずにリンク先だけ
+  /// Firebase Consoleから独自ハンドラーへ切り替えられる。
   Future<bool> _sendVerificationEmail() async {
     final user = _auth?.currentUser;
     if (user == null || user.isAnonymous || user.emailVerified) return true;
@@ -798,9 +976,12 @@ class AppState extends ChangeNotifier {
       await _auth!.setLanguageCode(switch (_locale) {
         AppLocale.ja => 'ja',
         AppLocale.ko => 'ko',
+        AppLocale.zhTw => 'zh-TW',
+        AppLocale.ptBr => 'pt-BR',
         AppLocale.en => 'en',
       });
       await user.sendEmailVerification();
+      _cloudError = null;
       return true;
     } on Object catch (error) {
       _cloudError = error;
@@ -819,6 +1000,24 @@ class AppState extends ChangeNotifier {
     await user.reload();
     notifyListeners();
     return _auth?.currentUser?.emailVerified ?? false;
+  }
+
+  /// Firebaseの標準画面を使わず、Tier表オンライン内のメール確認ページで
+  /// one-time action codeを適用する。
+  Future<bool> applyEmailVerificationActionCode(String code) async {
+    final auth = _auth;
+    if (auth == null || code.isEmpty) return false;
+    try {
+      await auth.applyActionCode(code);
+      await auth.currentUser?.reload();
+      _cloudError = null;
+      notifyListeners();
+      return true;
+    } on Object catch (error) {
+      _cloudError = error;
+      notifyListeners();
+      return false;
+    }
   }
 
   Future<AuthResult> signInWithEmail(String email, String password) async {
@@ -854,9 +1053,51 @@ class AppState extends ChangeNotifier {
     _pendingGoogleEmail = null;
   }
 
+  /// Web版はブラウザのモバイル判定で分岐する。モバイルSafari/Chromeでは
+  /// `google_sign_in`パッケージのポップアップ実装(既にdeprecated)がタブ制御
+  /// を誤り、ログイン完了後に元のタブへ戻らず他のタブへ遷移してしまう不具合
+  /// があったため、Firebase Auth純正のリダイレクト方式に切り替えている。
+  /// デスクトップWebはポップアップのままの方がUXが良いため維持し、ネイティブ
+  /// (Android/iOSアプリ)は引き続き`google_sign_in`パッケージを使う。
+  bool get _isMobileWeb =>
+      kIsWeb &&
+      (defaultTargetPlatform == TargetPlatform.iOS ||
+          defaultTargetPlatform == TargetPlatform.android);
+
+  Future<AuthResult> _recoverGoogleAuthError(
+    FirebaseAuth auth,
+    FirebaseAuthException error,
+    AuthCredential? credential, {
+    String? email,
+  }) async {
+    final pending = credential ?? error.credential;
+    switch (googleAuthRecoveryForErrorCode(error.code)) {
+      case GoogleAuthRecovery.signInExistingGoogle:
+        if (pending == null) return AuthResult.fromException(error);
+        try {
+          await auth.signInWithCredential(pending);
+          clearPendingGoogleCredential();
+          notifyListeners();
+          return const AuthResult(AuthResultStatus.success);
+        } on FirebaseAuthException catch (signInError) {
+          return AuthResult.fromException(signInError);
+        }
+      case GoogleAuthRecovery.linkDifferentProvider:
+        if (pending == null) return AuthResult.fromException(error);
+        _pendingGoogleCredential = pending;
+        _pendingGoogleEmail = error.email ?? email;
+        notifyListeners();
+        return const AuthResult(AuthResultStatus.googleAccountConflict);
+      case GoogleAuthRecovery.none:
+        return AuthResult.fromException(error);
+    }
+  }
+
   Future<AuthResult> signInWithGoogle() async {
     final auth = _auth;
     if (auth == null) return const AuthResult(AuthResultStatus.generic);
+    if (kIsWeb) return _signInWithGoogleWeb(auth);
+
     GoogleSignInAccount? googleUser;
     AuthCredential? credential;
     try {
@@ -876,23 +1117,70 @@ class AppState extends ChangeNotifier {
       } else {
         await auth.signInWithCredential(credential);
       }
+      clearPendingGoogleCredential();
       notifyListeners();
       return const AuthResult(AuthResultStatus.success);
     } on FirebaseAuthException catch (error) {
-      if (credential != null &&
-          (error.code == 'email-already-in-use' ||
-              error.code == 'credential-already-in-use' ||
-              error.code == 'account-exists-with-different-credential')) {
-        _pendingGoogleCredential = credential;
-        _pendingGoogleEmail = googleUser?.email;
-        notifyListeners();
-        return const AuthResult(AuthResultStatus.googleAccountConflict);
-      }
-      return AuthResult.fromException(error);
+      return _recoverGoogleAuthError(
+        auth,
+        error,
+        credential,
+        email: googleUser?.email,
+      );
     } on Object catch (error) {
       _cloudError = error;
       notifyListeners();
       return const AuthResult(AuthResultStatus.generic);
+    }
+  }
+
+  Future<AuthResult> _signInWithGoogleWeb(FirebaseAuth auth) async {
+    final provider = GoogleAuthProvider();
+    final current = auth.currentUser;
+    try {
+      if (_isMobileWeb) {
+        // ページ遷移が発生し、ここから先は基本的に戻ってこない。完了後は
+        // アプリ再読み込み時にconsumeGoogleRedirectResult()が結果を処理する。
+        if (current != null && current.isAnonymous) {
+          await current.linkWithRedirect(provider);
+        } else {
+          await auth.signInWithRedirect(provider);
+        }
+        return const AuthResult(AuthResultStatus.success);
+      }
+      if (current != null && current.isAnonymous) {
+        await current.linkWithPopup(provider);
+      } else {
+        await auth.signInWithPopup(provider);
+      }
+      clearPendingGoogleCredential();
+      notifyListeners();
+      return const AuthResult(AuthResultStatus.success);
+    } on FirebaseAuthException catch (error) {
+      return _recoverGoogleAuthError(auth, error, null);
+    } on Object catch (error) {
+      _cloudError = error;
+      notifyListeners();
+      return const AuthResult(AuthResultStatus.generic);
+    }
+  }
+
+  /// アプリ起動時に一度だけ呼ぶ。直前のsignInWithRedirect/linkWithRedirectが
+  /// アカウント競合で失敗していた場合、ここでgoogleAccountConflictとして
+  /// 検出しUIに伝える(成功時は既存のuserChanges()購読で自動的に反映される)。
+  Future<AuthResult?> consumeGoogleRedirectResult() async {
+    final auth = _auth;
+    if (auth == null || !kIsWeb) return null;
+    try {
+      final credential = await auth.getRedirectResult();
+      if (credential.user == null) return null;
+      clearPendingGoogleCredential();
+      notifyListeners();
+      return const AuthResult(AuthResultStatus.success);
+    } on FirebaseAuthException catch (error) {
+      return _recoverGoogleAuthError(auth, error, null);
+    } on Object {
+      return null;
     }
   }
 
@@ -964,6 +1252,34 @@ class AppState extends ChangeNotifier {
     }
   }
 
+  /// 利用規約・プライバシーポリシー記載の問い合わせ/削除依頼窓口。認証状態
+  /// (匿名含む)に関わらず送信できる。
+  Future<bool> submitContactRequest({
+    required String category,
+    required String message,
+    String? contactEmail,
+    String? relatedUrl,
+  }) async {
+    try {
+      final callable = FirebaseFunctions.instance.httpsCallable(
+        'submitContactRequest',
+      );
+      await callable.call<Map<String, dynamic>>({
+        'category': category,
+        'message': message,
+        if (contactEmail != null && contactEmail.isNotEmpty)
+          'contactEmail': contactEmail,
+        if (relatedUrl != null && relatedUrl.isNotEmpty)
+          'relatedUrl': relatedUrl,
+      });
+      return true;
+    } on Object catch (error) {
+      _cloudError = error;
+      notifyListeners();
+      return false;
+    }
+  }
+
   bool isTopicReported(String topicId) => _reportedTopicIds.contains(topicId);
 
   Future<bool> reportTopic(
@@ -1002,6 +1318,80 @@ class AppState extends ChangeNotifier {
       _cloudError = error;
     }
     notifyListeners();
+  }
+
+  Future<AccountDeletionStatus> deleteAccount({String? password}) async {
+    final auth = _auth;
+    final user = auth?.currentUser;
+    if (auth == null || user == null || user.isAnonymous) {
+      return AccountDeletionStatus.failed;
+    }
+    try {
+      if (accountUsesPassword) {
+        final email = user.email;
+        if (email == null || password == null || password.isEmpty) {
+          return AccountDeletionStatus.wrongPassword;
+        }
+        await user.reauthenticateWithCredential(
+          EmailAuthProvider.credential(email: email, password: password),
+        );
+      } else {
+        final googleUser = await GoogleSignIn().signIn();
+        if (googleUser == null) return AccountDeletionStatus.cancelled;
+        final googleAuth = await googleUser.authentication;
+        await user.reauthenticateWithCredential(
+          GoogleAuthProvider.credential(
+            accessToken: googleAuth.accessToken,
+            idToken: googleAuth.idToken,
+          ),
+        );
+      }
+      await auth.currentUser?.getIdToken(true);
+      final ownedTopicIds = createdTopics.map((topic) => topic.id).toList();
+      await FirebaseFunctions.instance
+          .httpsCallable('deleteUserAccount')
+          .call<Map<String, dynamic>>();
+
+      for (final topicId in ownedTopicIds) {
+        _repository.remove(topicId);
+        _cloudTopicIds.remove(topicId);
+      }
+      _placements.clear();
+      _localTalks.clear();
+      _loaded.clear();
+      _likedTopicIds.clear();
+      _talkReactions.clear();
+      _reportedTalkTargets.clear();
+      _reportedTopicIds.clear();
+      await _localStore.clearUserData();
+      final preferences = await SharedPreferences.getInstance();
+      await Future.wait([
+        preferences.remove('likedTopicIds'),
+        preferences.remove('talkReactions'),
+        preferences.remove('reportedTalkTargets'),
+        preferences.remove('reportedTopicIds'),
+        preferences.remove('anonymousId'),
+      ]);
+      _anonymousId = 'local-${DateTime.now().microsecondsSinceEpoch}';
+      await preferences.setString('anonymousId', _anonymousId);
+      await auth.signOut();
+      await auth.signInAnonymously();
+      _cloudError = null;
+      notifyListeners();
+      return AccountDeletionStatus.success;
+    } on FirebaseAuthException catch (error) {
+      _cloudError = error;
+      notifyListeners();
+      if (error.code == 'wrong-password' ||
+          error.code == 'invalid-credential') {
+        return AccountDeletionStatus.wrongPassword;
+      }
+      return AccountDeletionStatus.failed;
+    } on Object catch (error) {
+      _cloudError = error;
+      notifyListeners();
+      return AccountDeletionStatus.failed;
+    }
   }
 
   @override

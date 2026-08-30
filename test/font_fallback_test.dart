@@ -13,23 +13,32 @@ void main() {
     '티어표 온라인',
     '최강 캐릭터 랭킹',
     '한국어 테스트',
+    'Tier 表線上版',
+    '最強角色排行榜',
+    '繁體中文測試：臺灣、龍、麵、體',
     'Tier Online',
     'Best Character Ranking',
     'Create Your Tier List',
+    'Tier Online: criação, classificação e comparação',
     'ONE PIECE 最強 캐릭터 Tier',
     'K-POP 推しランキング',
     'Pokémon 포켓몬 最強Tier',
     '髙 﨑 邊 邉 齊 齋 神 福',
   ];
 
-  test('日英韓とOSフォントのfallback順を保持する', () {
+  test('日英韓繁葡とOSフォントのfallback順を保持する', () {
     expect(appFontFamilyFallback.take(2), const [
       'TierNotoSansJP',
       'TierNotoSansKR',
     ]);
     expect(
       appFontFamilyFallback,
-      containsAll(const ['Meiryo', 'Malgun Gothic']),
+      containsAll(const [
+        'Meiryo',
+        'Malgun Gothic',
+        'PingFang TC',
+        'Microsoft JhengHei',
+      ]),
     );
     expect(appFontFamilyFallback.last, 'sans-serif');
     expect(
@@ -42,7 +51,7 @@ void main() {
     );
   });
 
-  testWidgets('日英韓と混在テキストを同じ画面で描画できる', (tester) async {
+  testWidgets('日英韓繁葡と混在テキストを同じ画面で描画できる', (tester) async {
     await tester.pumpWidget(
       MaterialApp(
         theme: buildLightAppTheme(),

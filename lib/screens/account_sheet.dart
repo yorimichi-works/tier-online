@@ -4,17 +4,21 @@ import '../l10n/app_localizations.dart';
 import '../services/app_state.dart';
 import 'email_verification_pending_screen.dart';
 
-Future<void> showAccountSheet(BuildContext context, AppState appState) {
-  return showDialog<void>(
-    context: context,
-    builder: (context) => Dialog(
-      insetPadding: const EdgeInsets.symmetric(horizontal: 32, vertical: 24),
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 420),
-        child: _AccountSheetBody(appState: appState),
-      ),
-    ),
-  );
+Future<bool> showAccountSheet(BuildContext context, AppState appState) async {
+  return await showDialog<bool>(
+        context: context,
+        builder: (context) => Dialog(
+          insetPadding: const EdgeInsets.symmetric(
+            horizontal: 32,
+            vertical: 24,
+          ),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 420),
+            child: _AccountSheetBody(appState: appState),
+          ),
+        ),
+      ) ??
+      false;
 }
 
 class _AccountSheetBody extends StatefulWidget {
@@ -31,6 +35,19 @@ class _AccountSheetBodyState extends State<_AccountSheetBody> {
   final _password = TextEditingController();
   bool _isSignUp = true;
   bool _submitting = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // リダイレクト方式のGoogleログイン完了後、アカウント競合が検出済みの
+    // 状態でこのシートが開かれた場合は、通常のログインフォームではなく
+    // 統合ダイアログを直接表示する。
+    if (widget.appState.pendingGoogleAccountEmail != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _resolveGoogleAccountConflict();
+      });
+    }
+  }
 
   @override
   void dispose() {
@@ -54,6 +71,19 @@ class _AccountSheetBodyState extends State<_AccountSheetBody> {
     AuthResultStatus.generic ||
     AuthResultStatus.success => context.l10n.t('authErrorGeneric'),
   };
+
+  Future<void> _finishAuthentication() async {
+    if (widget.appState.needsEmailVerification) {
+      final verified = await Navigator.of(context).push<bool>(
+        MaterialPageRoute<bool>(
+          builder: (_) =>
+              EmailVerificationPendingScreen(appState: widget.appState),
+        ),
+      );
+      if (!mounted || verified != true) return;
+    }
+    if (mounted) Navigator.of(context).pop(true);
+  }
 
   Future<void> _submit() async {
     if (!(_formKey.currentState?.validate() ?? false)) return;
@@ -85,16 +115,7 @@ class _AccountSheetBodyState extends State<_AccountSheetBody> {
     if (!mounted) return;
     setState(() => _submitting = false);
     if (result.isSuccess) {
-      final navigator = Navigator.of(context);
-      navigator.pop();
-      if (widget.appState.needsEmailVerification) {
-        navigator.push(
-          MaterialPageRoute<void>(
-            builder: (_) =>
-                EmailVerificationPendingScreen(appState: widget.appState),
-          ),
-        );
-      }
+      await _finishAuthentication();
       return;
     }
     ScaffoldMessenger.of(
@@ -108,7 +129,7 @@ class _AccountSheetBodyState extends State<_AccountSheetBody> {
     if (!mounted) return;
     setState(() => _submitting = false);
     if (result.isSuccess) {
-      Navigator.of(context).pop();
+      await _finishAuthentication();
       return;
     }
     if (result.status == AuthResultStatus.googleAccountConflict) {
@@ -182,13 +203,11 @@ class _AccountSheetBodyState extends State<_AccountSheetBody> {
     passwordController.dispose();
     if (password == null || !mounted) return;
     setState(() => _submitting = true);
-    final result = await widget.appState.linkPendingGoogleCredential(
-      password,
-    );
+    final result = await widget.appState.linkPendingGoogleCredential(password);
     if (!mounted) return;
     setState(() => _submitting = false);
     if (result.isSuccess) {
-      Navigator.of(context).pop();
+      await _finishAuthentication();
       return;
     }
     ScaffoldMessenger.of(
@@ -291,7 +310,9 @@ class _AccountSheetBodyState extends State<_AccountSheetBody> {
           const SizedBox(height: 16),
           Row(
             children: [
-              Expanded(child: Divider(color: Theme.of(context).colorScheme.outline)),
+              Expanded(
+                child: Divider(color: Theme.of(context).colorScheme.outline),
+              ),
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 10),
                 child: Text(
@@ -302,7 +323,9 @@ class _AccountSheetBodyState extends State<_AccountSheetBody> {
                   ),
                 ),
               ),
-              Expanded(child: Divider(color: Theme.of(context).colorScheme.outline)),
+              Expanded(
+                child: Divider(color: Theme.of(context).colorScheme.outline),
+              ),
             ],
           ),
           const SizedBox(height: 16),

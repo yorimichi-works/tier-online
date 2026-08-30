@@ -1,6 +1,9 @@
 import '../models/tier_models.dart';
 import 'tier_repository.dart';
 
+const starterTierCreatorName = 'tier_online';
+const starterTierCreatorId = 'tier_online';
+
 class StarterTierRepository implements TierRepository {
   StarterTierRepository() : _topics = _specs.map(_buildTopic).toList();
 
@@ -58,7 +61,8 @@ class StarterTierRepository implements TierRepository {
       tags: spec.tags,
       category: spec.category,
       categoryId: spec.category == '食べ物' ? 'food' : 'lifestyle',
-      creatorName: 'Tier表オンライン編集部',
+      creatorName: starterTierCreatorName,
+      creatorId: starterTierCreatorId,
       participants: 1,
       likeCount: 0,
       items: items,

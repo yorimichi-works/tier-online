@@ -18,10 +18,13 @@
 
   <meta charset="UTF-8">
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
-  <meta name="description" content="Create and share tier lists for free with Tier Online.">
+  <meta name="google-site-verification" content="5I_WtmhnHQHh60JoHFQLwKtk6Fs0yuMyVGyLN5Ghki4" />
+  <meta name="description" content="無料でTier表を作成・共有。みんなのランキングと自分の結果を比べよう。">
   <meta property="og:type" content="website">
-  <meta property="og:title" content="Tier Online | Create and Share Tier Lists">
-  <meta property="og:description" content="Create and share tier lists for free with Tier Online.">
+  <meta property="og:title" content="tier表オンライン｜無料でTier表を作成・共有">
+  <meta property="og:description" content="無料でTier表を作成・共有。みんなのランキングと自分の結果を比べよう。">
+  <meta property="og:image" content="https://tier-online.web.app/og-image-ja.png">
+  <meta name="twitter:card" content="summary_large_image">
   <meta name="theme-color" content="#0D0D0F">
   <!-- google_sign_in (Flutter Web) が参照するOAuth Webクライアントid -->
   <meta name="google-signin-client_id" content="553966867727-fufba9jquashagb7gg8haf52ap99att3.apps.googleusercontent.com">
@@ -58,7 +61,8 @@
     body {
       background: #0D0D0F;
       font-family: "TierNotoSansJP", "TierNotoSansKR", "Noto Sans",
-        "Noto Sans JP", "Noto Sans KR", "Yu Gothic", YuGothic,
+        "Noto Sans TC", "Noto Sans JP", "Noto Sans KR", "PingFang TC",
+        "Microsoft JhengHei", "Yu Gothic", YuGothic,
         "Yu Gothic UI", "Hiragino Kaku Gothic ProN", Meiryo,
         "Apple SD Gothic Neo", "Malgun Gothic", Arial, Helvetica, sans-serif;
       margin: 0;
@@ -95,7 +99,8 @@
     }
 
     .app-loading-label {
-      font-family: Arial, "Yu Gothic", YuGothic, Meiryo,
+      font-family: Arial, "PingFang TC", "Microsoft JhengHei",
+        "Yu Gothic", YuGothic, Meiryo,
         "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
       font-size: 16px;
       font-weight: 700;
@@ -121,57 +126,86 @@
   <!-- Favicon -->
   <link rel="icon" type="image/png" href="favicon.png"/>
 
-  <title>Tier Online | Create and Share Tier Lists</title>
+  <title>tier表オンライン｜無料でTier表を作成・共有</title>
   <link rel="manifest" href="manifest.json">
   <script async
     src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-3186852093801241"
     crossorigin="anonymous"></script>
   <script>
     (() => {
-      const pathLocale = ['ja', 'ko', 'en'].includes(location.pathname.split('/')[1])
+      const pathLocale = ['ja', 'ko', 'en', 'zh-tw', 'pt-br'].includes(location.pathname.split('/')[1])
         ? location.pathname.split('/')[1]
         : null;
       const browserLocale = navigator.language || 'ja-JP';
       const localeParts = browserLocale.replace('_', '-').split('-');
       const language = localeParts[0].toLowerCase();
-      const region = (localeParts[1] || '').toUpperCase();
+      const region = localeParts.map((part) => part.toUpperCase()).find((part) => ['JP', 'KR', 'TW', 'BR'].includes(part)) || '';
+      const traditionalChinese = localeParts.some((part) => part.toLowerCase() === 'hant');
       const detectedLocale = region === 'KR' || language === 'ko'
         ? 'ko'
         : region === 'JP' || language === 'ja'
           ? 'ja'
-          : 'en';
+          : region === 'TW' || (language === 'zh' && traditionalChinese)
+            ? 'zh-tw'
+            : region === 'BR' || language === 'pt'
+              ? 'pt-br'
+              : 'en';
       const locale = pathLocale || detectedLocale;
       const meta = {
         ja: {
           title: 'tier表オンライン｜無料でTier表を作成・共有',
           description: '無料でTier表を作成・共有。みんなのランキングと自分の結果を比べよう。',
-          ogLocale: 'ja_JP'
+          ogLocale: 'ja_JP',
+          image: '/og-image-ja.png'
         },
         ko: {
           title: '티어표 온라인 | 무료 티어표 만들기',
           description: '무료로 티어표를 만들고 공유하고, 모두의 랭킹과 비교해 보세요.',
-          ogLocale: 'ko_KR'
+          ogLocale: 'ko_KR',
+          image: '/og-image-ko.png'
+        },
+        'zh-tw': {
+          title: 'Tier 表線上版｜免費建立與分享 Tier 排名',
+          description: '免費建立並分享 Tier 排名表，和大家的排名結果互相比較。',
+          ogLocale: 'zh_TW',
+          image: '/icons/Icon-512.png'
+        },
+        'pt-br': {
+          title: 'Tier Online | Crie e compartilhe Tier Lists',
+          description: 'Crie e compartilhe Tier Lists gratuitamente e compare seu ranking com a comunidade.',
+          ogLocale: 'pt_BR',
+          image: '/og-image-en.png'
         },
         en: {
           title: 'Tier Online | Create and Share Tier Lists',
           description: 'Create and share tier lists for free, then compare your ranking with the community.',
-          ogLocale: 'en_US'
+          ogLocale: 'en_US',
+          image: '/og-image-en.png'
         }
       }[locale];
-      document.documentElement.lang = locale;
+      document.documentElement.lang = locale === 'zh-tw'
+        ? 'zh-TW'
+        : locale === 'pt-br'
+          ? 'pt-BR'
+          : locale;
       document.title = meta.title;
       document.querySelector('meta[name="description"]').content = meta.description;
       document.querySelector('meta[property="og:title"]').content = meta.title;
       document.querySelector('meta[property="og:description"]').content = meta.description;
+      document.querySelector('meta[property="og:image"]').content = `${location.origin}${meta.image}`;
       const ogLocale = document.createElement('meta');
       ogLocale.property = 'og:locale';
       ogLocale.content = meta.ogLocale;
       document.head.appendChild(ogLocale);
-      if (/^\/(ja|ko|en)\/?$/.test(location.pathname)) {
-        for (const code of ['ja', 'ko', 'en']) {
+      if (/^\/(ja|ko|en|zh-tw|pt-br)\/?$/.test(location.pathname)) {
+        for (const code of ['ja', 'ko', 'en', 'zh-tw', 'pt-br']) {
           const link = document.createElement('link');
           link.rel = 'alternate';
-          link.hreflang = code;
+          link.hreflang = code === 'zh-tw'
+            ? 'zh-Hant-TW'
+            : code === 'pt-br'
+              ? 'pt-BR'
+              : code;
           link.href = `${location.origin}/${code}/`;
           document.head.appendChild(link);
         }
@@ -199,6 +233,8 @@
         ? '티어표 온라인'
         : locale === 'ja'
           ? 'tier表オンライン'
+          : locale.toLowerCase() === 'zh-tw'
+            ? 'Tier 表線上版'
           : 'Tier Online';
       window.addEventListener('flutter-first-frame', () => {
         // CanvasKit can complete its first frame just before its bundled

@@ -118,9 +118,11 @@ class TalkPost {
   final List<TalkReply> replies;
   final int upvotes;
   final int downvotes;
+
   /// 投稿者の匿名/アカウントID。「自分のtierを載せる」で自分のTier結果に
   /// リンクするために使う。
   final String? authorUserId;
+
   /// 投稿時に「自分のtierを載せる」がチェックされていたかどうか。
   final bool attachedTier;
   int get displayMinutesAgo => createdAt == null
@@ -155,6 +157,7 @@ class TalkReply {
     this.replies = const [],
     this.upvotes = 0,
     this.downvotes = 0,
+    this.authorUserId,
   });
 
   final String id;
@@ -165,6 +168,7 @@ class TalkReply {
   final List<TalkReply> replies;
   final int upvotes;
   final int downvotes;
+  final String? authorUserId;
 
   TalkReply copyWith({
     List<TalkReply>? replies,
@@ -179,6 +183,7 @@ class TalkReply {
     replies: replies ?? this.replies,
     upvotes: upvotes ?? this.upvotes,
     downvotes: downvotes ?? this.downvotes,
+    authorUserId: authorUserId,
   );
 }
 
@@ -208,6 +213,7 @@ class TierTopic {
     this.reportCount = 0,
     this.createdByAnonymous = false,
     this.isPublic = true,
+    this.shareUploadedImages = false,
   });
 
   final String id;
@@ -236,6 +242,7 @@ class TierTopic {
   final int reportCount;
   final bool createdByAnonymous;
   final bool isPublic;
+  final bool shareUploadedImages;
 
   TierItem? get faceItem {
     for (final rank in TierRank.values) {
@@ -265,6 +272,7 @@ class TierTopic {
     String? moderationStatus,
     int? reportCount,
     bool? isPublic,
+    bool? shareUploadedImages,
   }) => TierTopic(
     id: id,
     title: title,
@@ -290,6 +298,7 @@ class TierTopic {
     reportCount: reportCount ?? this.reportCount,
     createdByAnonymous: createdByAnonymous,
     isPublic: isPublic ?? this.isPublic,
+    shareUploadedImages: shareUploadedImages ?? this.shareUploadedImages,
   );
 }
 

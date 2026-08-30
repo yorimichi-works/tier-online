@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 
 import '../l10n/app_localizations.dart';
@@ -214,12 +216,124 @@ class _TierItemImage extends StatelessWidget {
         errorBuilder: errorBuilder,
       );
     }
+    if (imageUrl.startsWith('data:')) {
+      final comma = imageUrl.indexOf(',');
+      try {
+        final bytes = base64Decode(imageUrl.substring(comma + 1));
+        return Image.memory(
+          bytes,
+          fit: BoxFit.cover,
+          errorBuilder: errorBuilder,
+        );
+      } on FormatException {
+        return errorBuilder(context, 'invalid data URI', null);
+      }
+    }
     return Image.network(
       imageUrl,
       fit: BoxFit.cover,
       errorBuilder: errorBuilder,
     );
   }
+}
+
+/// 長押ししている間だけ、その画像をオーバーレイで拡大表示する。カード自体
+/// のレイアウト(横スクロール行内)を崩さないよう、Overlayに元の位置へ重ねて
+/// 描画する。テキストのみのカードは既に全文が読めるため対象外。
+class _ZoomableTierItem extends StatefulWidget {
+  const _ZoomableTierItem({required this.item, required this.child});
+  final TierItem item;
+  final Widget child;
+  @override
+  State<_ZoomableTierItem> createState() => _ZoomableTierItemState();
+}
+
+class _ZoomableTierItemState extends State<_ZoomableTierItem>
+    with SingleTickerProviderStateMixin {
+  final _key = GlobalKey();
+  OverlayEntry? _entry;
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 180),
+  );
+
+  @override
+  void dispose() {
+    _entry?.remove();
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _start() {
+    if (!widget.item.hasImage) return;
+    final box = _key.currentContext?.findRenderObject() as RenderBox?;
+    if (box == null || !box.attached) return;
+    final position = box.localToGlobal(Offset.zero);
+    final size = box.size;
+    final scale = Tween<double>(
+      begin: 1,
+      end: 2.4,
+    ).animate(CurvedAnimation(parent: _controller, curve: Curves.easeOutBack));
+    _entry?.remove();
+    _entry = OverlayEntry(
+      builder: (context) => Positioned(
+        left: position.dx,
+        top: position.dy,
+        width: size.width,
+        height: size.height,
+        child: IgnorePointer(
+          child: AnimatedBuilder(
+            animation: scale,
+            builder: (context, child) =>
+                Transform.scale(scale: scale.value, child: child),
+            child: Material(
+              elevation: 16,
+              borderRadius: BorderRadius.circular(14),
+              clipBehavior: Clip.antiAlias,
+              child: SizedBox(
+                width: size.width,
+                height: size.height,
+                child: _TierItemImage(imageUrl: widget.item.imageUrl!),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    Overlay.of(context).insert(_entry!);
+    _controller.forward(from: 0);
+  }
+
+  void _end() {
+    if (_entry == null) return;
+    _controller.reverse().whenCompleteOrCancel(() {
+      _entry?.remove();
+      _entry = null;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+    key: _key,
+    onLongPressStart: (_) => _start(),
+    onLongPressEnd: (_) => _end(),
+    onLongPressCancel: _end,
+    child: widget.child,
+  );
+}
+
+void _showFullItemName(BuildContext context, String name) {
+  ScaffoldMessenger.of(context)
+    ..hideCurrentSnackBar()
+    ..showSnackBar(
+      SnackBar(
+        content: Text(
+          name,
+          style: const TextStyle(fontWeight: FontWeight.w800),
+        ),
+        duration: const Duration(seconds: 3),
+      ),
+    );
 }
 
 class TierRowView extends StatelessWidget {
@@ -280,7 +394,16 @@ class TierRowView extends StatelessWidget {
                       for (final item in items)
                         Padding(
                           padding: const EdgeInsets.only(right: 7),
-                          child: TierItemCard(item: item, size: cardSize),
+                          child: _ZoomableTierItem(
+                            item: item,
+                            child: TierItemCard(
+                              item: item,
+                              size: cardSize,
+                              onTap: item.hasName
+                                  ? () => _showFullItemName(context, item.name!)
+                                  : null,
+                            ),
+                          ),
                         ),
                     ],
             ),
@@ -409,7 +532,11 @@ class _TrendingBadge extends StatelessWidget {
     child: Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        const Icon(Icons.local_fire_department_rounded, size: 13, color: Colors.white),
+        const Icon(
+          Icons.local_fire_department_rounded,
+          size: 13,
+          color: Colors.white,
+        ),
         const SizedBox(width: 3),
         Text(
           context.l10n.t('trending'),
@@ -613,7 +740,10 @@ class _FullTopicCardBody extends StatelessWidget {
                   const SizedBox(width: 8),
                   GestureDetector(
                     onTap: onLike,
-                    child: _LikeCountBadge(count: topic.likeCount, liked: liked),
+                    child: _LikeCountBadge(
+                      count: topic.likeCount,
+                      liked: liked,
+                    ),
                   ),
                 ],
               ),

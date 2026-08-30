@@ -6,9 +6,13 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 
 import 'l10n/app_localizations.dart';
 import 'repositories/starter_tier_repository.dart';
+import 'screens/account_sheet.dart';
 import 'screens/app_shell.dart';
+import 'screens/contact_screen.dart';
+import 'screens/email_action_screen.dart';
 import 'screens/email_verification_pending_screen.dart';
-import 'screens/topic_detail_screen.dart';
+import 'screens/legal_screen.dart';
+import 'screens/topic_route_screen.dart';
 import 'services/app_state.dart';
 import 'services/firebase_bootstrap.dart';
 import 'theme/app_theme.dart';
@@ -28,18 +32,22 @@ Future<void> _initializeServices(AppState appState) async {
   // The bundled starter tiers must be usable immediately. Network-dependent
   // Firebase setup starts only after Flutter has painted its first frame, so a
   // slow or blocked connection can never hold the loading cover over the UI.
-  final localInitialization = appState.initialize();
-  await WidgetsBinding.instance.endOfFrame;
-  final firebase = await FirebaseBootstrap.initialize().timeout(
-    const Duration(seconds: 8),
-    onTimeout: () => const FirebaseBootstrapResult(),
-  );
-  await localInitialization;
-  if (firebase.repository != null && firebase.auth != null) {
-    await appState.attachCloud(
-      cloudRepository: firebase.repository!,
-      auth: firebase.auth!,
+  try {
+    final localInitialization = appState.initialize();
+    await WidgetsBinding.instance.endOfFrame;
+    final firebase = await FirebaseBootstrap.initialize().timeout(
+      const Duration(seconds: 8),
+      onTimeout: () => const FirebaseBootstrapResult(),
     );
+    await localInitialization;
+    if (firebase.repository != null && firebase.auth != null) {
+      await appState.attachCloud(
+        cloudRepository: firebase.repository!,
+        auth: firebase.auth!,
+      );
+    }
+  } finally {
+    appState.completeCloudBootstrap();
   }
 }
 
@@ -54,8 +62,17 @@ class TierTableOnlineApp extends StatefulWidget {
 class _TierTableOnlineAppState extends State<TierTableOnlineApp> {
   final _navigatorKey = GlobalKey<NavigatorState>();
   bool _verificationPromptShown = false;
+  bool _redirectResultConsumed = false;
 
   AppState get appState => widget.appState;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _maybePromptVerification();
+    });
+  }
 
   void _maybePromptVerification() {
     if (_verificationPromptShown || !appState.needsEmailVerification) return;
@@ -64,16 +81,35 @@ class _TierTableOnlineAppState extends State<TierTableOnlineApp> {
     _verificationPromptShown = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       navigator.push(
-        MaterialPageRoute<void>(
+        MaterialPageRoute<bool>(
           builder: (_) => EmailVerificationPendingScreen(appState: appState),
         ),
       );
     });
   }
 
+  // モバイルWebのGoogleログインはリダイレクト方式(main.dartのコメント参照
+  // のsignInWithGoogle実装)で行うため、アカウント競合(既にパスワードで
+  // 登録済みのメール)が起きていないかをアプリ再読み込み時に確認する。
+  void _maybeConsumeGoogleRedirectResult() {
+    if (_redirectResultConsumed || !appState.cloudBootstrapComplete) return;
+    _redirectResultConsumed = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      final result = await appState.consumeGoogleRedirectResult();
+      if (!mounted ||
+          result?.status != AuthResultStatus.googleAccountConflict) {
+        return;
+      }
+      final context = _navigatorKey.currentState?.context;
+      if (context != null && context.mounted) {
+        await showAccountSheet(context, appState);
+      }
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
-    _maybePromptVerification();
+    _maybeConsumeGoogleRedirectResult();
     return AnimatedBuilder(
       animation: appState,
       builder: (context, _) => MaterialApp(
@@ -111,21 +147,42 @@ class _TierTableOnlineAppState extends State<TierTableOnlineApp> {
     final segments =
         Uri.tryParse(settings.name ?? '/')?.pathSegments ?? const [];
     if (segments.length >= 3 && segments[1] == 'tier') {
-      final topic = appState.topics
-          .where((topic) => topic.id == segments[2])
-          .firstOrNull;
-      if (topic != null) {
-        return MaterialPageRoute<void>(
-          settings: settings,
-          builder: (_) => TopicDetailScreen(
-            appState: appState,
-            topic: topic,
-            onTagTap: settings.arguments is ValueChanged<String?>
-                ? settings.arguments! as ValueChanged<String?>
-                : (_) {},
-          ),
-        );
-      }
+      return MaterialPageRoute<void>(
+        settings: settings,
+        builder: (_) => TopicRouteScreen(
+          appState: appState,
+          topicId: segments[2],
+          onTagTap: settings.arguments is ValueChanged<String?>
+              ? settings.arguments! as ValueChanged<String?>
+              : (_) {},
+        ),
+      );
+    }
+    if (segments.length >= 3 &&
+        segments[1] == 'auth' &&
+        segments[2] == 'action') {
+      return MaterialPageRoute<void>(
+        settings: settings,
+        builder: (_) => EmailActionScreen(appState: appState),
+      );
+    }
+    if (segments.length >= 2 && segments[1] == 'terms') {
+      return MaterialPageRoute<void>(
+        settings: settings,
+        builder: (_) => TermsScreen(appState: appState),
+      );
+    }
+    if (segments.length >= 2 && segments[1] == 'privacy') {
+      return MaterialPageRoute<void>(
+        settings: settings,
+        builder: (_) => PrivacyScreen(appState: appState),
+      );
+    }
+    if (segments.length >= 2 && segments[1] == 'contact') {
+      return MaterialPageRoute<void>(
+        settings: settings,
+        builder: (_) => ContactScreen(appState: appState),
+      );
     }
     final initialIndex = segments.length < 2
         ? 0

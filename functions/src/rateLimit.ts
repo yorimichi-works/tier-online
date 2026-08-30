@@ -1,7 +1,10 @@
 import {FieldValue, Firestore} from "firebase-admin/firestore";
 import {HttpsError} from "firebase-functions/v2/https";
 
-export type RateLimitAction = "create" | "publish" | "imageSearch";
+export type RateLimitAction =
+  | "create"
+  | "publish"
+  | "imageSearch";
 
 export interface RateLimitTier {
   create: number;
@@ -11,7 +14,11 @@ export interface RateLimitTier {
 
 export const defaultRateLimits: {anonymous: RateLimitTier; authenticated: RateLimitTier} = {
   anonymous: {create: 3, publish: 10, imageSearch: 30},
-  authenticated: {create: 15, publish: 60, imageSearch: 150},
+  authenticated: {
+    create: 15,
+    publish: 60,
+    imageSearch: 150,
+  },
 };
 
 const WINDOW_MS = 24 * 60 * 60 * 1000;

@@ -9,6 +9,7 @@ import '../models/tier_models.dart';
 import '../models/tier_serialization.dart';
 import '../l10n/app_localizations.dart';
 import 'cloud_tier_repository.dart';
+import 'starter_tier_repository.dart';
 
 class FirebaseTierRepository implements CloudTierRepository {
   FirebaseTierRepository({
@@ -85,10 +86,36 @@ class FirebaseTierRepository implements CloudTierRepository {
     return topics;
   }
 
+  @override
+  Future<TierTopic?> loadTopic(String topicId) async {
+    final DocumentSnapshot<Map<String, dynamic>> document;
+    try {
+      document = await _topics.doc(topicId).get();
+    } on FirebaseException catch (error) {
+      // Firestore rules intentionally hide private/blocked topics from other
+      // users. A missing document can be indistinguishable from a denied read,
+      // and both should be presented as unavailable instead of a network error.
+      if (error.code == 'permission-denied') return null;
+      rethrow;
+    }
+    if (!document.exists) return null;
+    final data = document.data()!;
+    if (data['isPublic'] == false ||
+        !const {
+          'approved',
+          'flagged',
+        }.contains(data['moderationStatus'] as String? ?? 'approved')) {
+      return null;
+    }
+    final topic = await _topicFromDocument(document);
+    return topic;
+  }
+
   Future<TierTopic> _topicFromDocument(
-    QueryDocumentSnapshot<Map<String, dynamic>> document,
+    DocumentSnapshot<Map<String, dynamic>> document,
   ) async {
-    final data = document.data();
+    final data = document.data()!;
+    final isStarterTier = document.id.startsWith('starter-');
     final itemSnapshot = await document.reference
         .collection('items')
         .orderBy('sortIndex')
@@ -115,8 +142,12 @@ class FirebaseTierRepository implements CloudTierRepository {
       description: data['description'] as String? ?? '',
       tags: (data['tags'] as List<dynamic>? ?? const []).cast<String>(),
       category: data['category'] as String? ?? 'その他',
-      creatorName: data['creatorName'] as String? ?? '匿名クリエイター',
-      creatorId: data['creatorId'] as String?,
+      creatorName: isStarterTier
+          ? starterTierCreatorName
+          : data['creatorName'] as String? ?? '匿名クリエイター',
+      creatorId: isStarterTier
+          ? starterTierCreatorId
+          : data['creatorId'] as String?,
       participants: data['participants'] as int? ?? 0,
       likeCount: data['likeCount'] as int? ?? 0,
       items: items,
@@ -142,6 +173,7 @@ class FirebaseTierRepository implements CloudTierRepository {
       reportCount: data['reportCount'] as int? ?? 0,
       createdByAnonymous: data['createdByAnonymous'] as bool? ?? false,
       isPublic: data['isPublic'] as bool? ?? true,
+      shareUploadedImages: data['shareUploadedImages'] as bool? ?? false,
     );
   }
 
@@ -199,6 +231,7 @@ class FirebaseTierRepository implements CloudTierRepository {
         ),
         'isTrending': topic.isTrending,
         'isPublic': topic.isPublic,
+        'shareUploadedImages': topic.shareUploadedImages,
         'items': [
           for (final item in uploadedItems)
             {
@@ -240,6 +273,7 @@ class FirebaseTierRepository implements CloudTierRepository {
       moderationStatus: response['moderationStatus'] as String? ?? 'approved',
       reportCount: response['reportCount'] as int? ?? 0,
       isPublic: topic.isPublic,
+      shareUploadedImages: topic.shareUploadedImages,
     );
   }
 
@@ -335,9 +369,21 @@ class FirebaseTierRepository implements CloudTierRepository {
     final collection = _topics.doc(topicId).collection('talks');
     for (final post in posts) {
       if (post.id == null) continue;
-      batch.set(collection.doc(post.id), TierSerialization.talkToJson(post));
+      batch.set(collection.doc(post.id), {
+        ...TierSerialization.talkToJson(post),
+        'replyAuthorIds': _replyAuthorIds(post.replies).toList(),
+      });
     }
     await batch.commit();
+  }
+
+  Set<String> _replyAuthorIds(List<TalkReply> replies) {
+    final ids = <String>{};
+    for (final reply in replies) {
+      if (reply.authorUserId != null) ids.add(reply.authorUserId!);
+      ids.addAll(_replyAuthorIds(reply.replies));
+    }
+    return ids;
   }
 
   @override

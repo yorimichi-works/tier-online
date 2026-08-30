@@ -12,23 +12,62 @@ import 'package:tier_table_online/services/tier_aggregation_service.dart';
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
-  test('JPは日本語、KRは韓国語、それ以外は英語へ振り分ける', () {
+  test('JP・KR・TW・BRを各言語へ、それ以外を英語へ振り分ける', () {
     expect(AppLocaleParser.fromDevice(const Locale('en', 'JP')), AppLocale.ja);
     expect(AppLocaleParser.fromDevice(const Locale('en', 'KR')), AppLocale.ko);
+    expect(
+      AppLocaleParser.fromDevice(const Locale('zh', 'TW')),
+      AppLocale.zhTw,
+    );
+    expect(AppLocaleParser.fromCode('zh-TW'), AppLocale.zhTw);
+    expect(
+      AppLocaleParser.fromDevice(const Locale('pt', 'BR')),
+      AppLocale.ptBr,
+    );
+    expect(AppLocaleParser.fromCode('pt-BR'), AppLocale.ptBr);
     expect(AppLocaleParser.fromDevice(const Locale('fr', 'FR')), AppLocale.en);
     expect(AppLocaleParser.fromDevice(const Locale('ja')), AppLocale.ja);
   });
 
-  test('いいね・うーん・通報の文言を3言語で提供する', () {
+  test('既存Google資格情報はパスワード統合ではなく通常ログインへ復旧する', () {
+    expect(
+      googleAuthRecoveryForErrorCode('credential-already-in-use'),
+      GoogleAuthRecovery.signInExistingGoogle,
+    );
+    expect(
+      googleAuthRecoveryForErrorCode(
+        'account-exists-with-different-credential',
+      ),
+      GoogleAuthRecovery.linkDifferentProvider,
+    );
+    expect(
+      googleAuthRecoveryForErrorCode('network-request-failed'),
+      GoogleAuthRecovery.none,
+    );
+  });
+
+  test('いいね・うーん・通報の文言を5言語で提供する', () {
     for (final entry in const [
       (AppLocale.ja, '👍 いいね 0', '🤔 うーん 0', '通報する'),
       (AppLocale.ko, '👍 좋아요 0', '🤔 글쎄요 0', '신고하기'),
+      (AppLocale.zhTw, '👍 讚 0', '🤔 嗯… 0', '檢舉'),
+      (AppLocale.ptBr, '👍 Curtir 0', '🤔 Hmm 0', 'Denunciar'),
       (AppLocale.en, '👍 Like 0', '🤔 Hmm 0', 'Report'),
     ]) {
       final l10n = AppLocalizations(entry.$1);
       expect(l10n.format('reactionLike', const {'count': 0}), entry.$2);
       expect(l10n.format('reactionHmm', const {'count': 0}), entry.$3);
       expect(l10n.t('reportComment'), entry.$4);
+    }
+  });
+
+  test('全翻訳辞書は英語辞書と同じキーを持つ', () {
+    for (final locale in AppLocale.values) {
+      expect(
+        AppLocalizations.keysForTesting(locale),
+        AppLocalizations.keysForTesting(AppLocale.en),
+        reason: locale.code,
+      );
     }
   });
 
@@ -50,6 +89,7 @@ void main() {
       participants: 1,
       items: [item],
       community: {'local-1-0': TierRank.s},
+      shareUploadedImages: true,
     );
     final submission = UserTierSubmission(
       id: 'submission-1',
@@ -74,6 +114,7 @@ void main() {
           body: '賛成です',
           createdAt: DateTime(2026),
           stance: ReplyStance.agree,
+          authorUserId: 'reply-user',
         ),
       ],
     );
@@ -87,9 +128,11 @@ void main() {
     final restoredTalk = (await store.loadTalks(topic.id)).single;
     expect(restoredTopic.items.single.name, isNull);
     expect(restoredTopic.items.single.imageUrl, item.imageUrl);
+    expect(restoredTopic.shareUploadedImages, isTrue);
     expect(restoredSubmission!.placements[TierRank.s], [item.id]);
     expect(restoredTalk.body, 'これはS');
     expect(restoredTalk.replies.single.stance, ReplyStance.agree);
+    expect(restoredTalk.replies.single.authorUserId, 'reply-user');
   });
 
   test('複数回答の単純平均と評価分散を集計できる', () {
@@ -126,6 +169,45 @@ void main() {
     expect(aggregate.ranks[item.id], TierRank.b);
     expect(aggregate.distributions[item.id]![TierRank.s], 1);
     expect(aggregate.disagreement[item.id], greaterThan(0));
+  });
+
+  test('アカウント削除時は端末内ユーザーデータだけを消去する', () async {
+    final store = LocalTierStore();
+    const item = TierItem(
+      id: 'delete-local-item',
+      topicId: 'delete-local-topic',
+      sortIndex: 0,
+      name: '削除対象',
+    );
+    const topic = TierTopic(
+      id: 'delete-local-topic',
+      title: '削除対象Tier',
+      description: '',
+      tags: [],
+      category: 'その他',
+      creatorName: 'あなた',
+      participants: 1,
+      items: [item],
+      community: {'delete-local-item': TierRank.s},
+    );
+    final preferences = await SharedPreferences.getInstance();
+    await preferences.setString('themeMode', 'light');
+    await store.saveTopic(topic);
+    await store.saveTalks(topic.id, const [
+      TalkPost(
+        id: 'delete-talk',
+        author: 'あなた',
+        body: '削除対象',
+        rank: TierRank.s,
+        minutesAgo: 0,
+      ),
+    ]);
+
+    await store.clearUserData();
+
+    expect(await store.loadTopics(), isEmpty);
+    expect(await store.loadTalks(topic.id), isEmpty);
+    expect(preferences.getString('themeMode'), 'light');
   });
 
   test('Firebase接続時は評価を同期して集合Tierを更新する', () async {
@@ -301,14 +383,92 @@ void main() {
       '独自の説明',
     );
   });
+
+  test('クラウドTierの削除成功後に端末データも整理する', () async {
+    SharedPreferences.setMockInitialValues({
+      'likedTopicIds': ['cloud-topic'],
+      'talkReactions': ['cloud-topic|post|root=up'],
+      'reportedTalkTargets': ['cloud-topic|post|root'],
+      'reportedTopicIds': ['cloud-topic'],
+    });
+    final repository = DummyTierRepository();
+    final cloud = _FakeCloudTierRepository();
+    final state = AppState(repository, cloudRepository: cloud);
+    await state.initialize();
+    final topic = repository.getById('cloud-topic')!;
+
+    expect(await state.deleteOwnTopic(topic), isTrue);
+    expect(cloud.deletedTopicIds, ['cloud-topic']);
+    expect(repository.getById('cloud-topic'), isNull);
+    final preferences = await SharedPreferences.getInstance();
+    expect(preferences.getStringList('likedTopicIds'), isEmpty);
+    expect(preferences.getStringList('talkReactions'), isEmpty);
+    expect(preferences.getStringList('reportedTalkTargets'), isEmpty);
+    expect(preferences.getStringList('reportedTopicIds'), isEmpty);
+  });
+
+  test('クラウド削除失敗時はTierを残して失敗を返す', () async {
+    final repository = DummyTierRepository();
+    final cloud = _FakeCloudTierRepository()..failDeletion = true;
+    final state = AppState(repository, cloudRepository: cloud);
+    await state.initialize();
+    final topic = repository.getById('cloud-topic')!;
+
+    expect(await state.deleteOwnTopic(topic), isFalse);
+    expect(repository.getById('cloud-topic'), isNotNull);
+    expect(state.cloudError, isA<StateError>());
+  });
+
+  test('別UIDのクラウドTierは作成者名が「あなた」でも削除しない', () async {
+    final repository = DummyTierRepository();
+    final cloud = _FakeCloudTierRepository();
+    final state = AppState(repository, cloudRepository: cloud);
+    await state.initialize();
+    final topic = repository.getById('cloud-topic')!;
+    cloud.userId = 'different-user';
+
+    expect(state.isOwnTopic(topic), isFalse);
+    expect(await state.deleteOwnTopic(topic), isFalse);
+    expect(cloud.deletedTopicIds, isEmpty);
+    expect(repository.getById('cloud-topic'), isNotNull);
+  });
+
+  test('共有URLのIDから一覧外のクラウドTierを直接取得できる', () async {
+    final repository = DummyTierRepository();
+    final cloud = _FakeCloudTierRepository();
+    final state = AppState(repository, cloudRepository: cloud);
+
+    final topic = await state.loadTopicById('direct-topic');
+
+    expect(topic?.title, '直接表示Tier');
+    expect(repository.getById('direct-topic'), same(topic));
+    expect(cloud.loadedTopicIds, ['direct-topic']);
+  });
+
+  test('共有URLは端末キャッシュよりクラウドを優先し、消えたTierを破棄する', () async {
+    SharedPreferences.setMockInitialValues({});
+    final repository = DummyTierRepository();
+    final cloud = _FakeCloudTierRepository();
+    final state = AppState(repository, cloudRepository: cloud);
+    await state.initialize();
+
+    expect(repository.getById('yokai'), isNotNull);
+    expect(await state.loadTopicById('yokai'), isNull);
+    expect(repository.getById('yokai'), isNull);
+    expect(cloud.loadedTopicIds, contains('yokai'));
+  });
 }
 
 class _FakeCloudTierRepository implements CloudTierRepository {
   final submissions = <UserTierSubmission>[];
   final savedSubmissions = <UserTierSubmission>[];
+  final deletedTopicIds = <String>[];
+  final loadedTopicIds = <String>[];
+  String userId = 'firebase-user';
+  bool failDeletion = false;
 
   @override
-  String get currentUserId => 'firebase-user';
+  String get currentUserId => userId;
 
   @override
   Future<List<TierTopic>> loadTopics() async => const [
@@ -334,13 +494,40 @@ class _FakeCloudTierRepository implements CloudTierRepository {
   ];
 
   @override
+  Future<TierTopic?> loadTopic(String topicId) async {
+    loadedTopicIds.add(topicId);
+    if (topicId != 'direct-topic') return null;
+    return const TierTopic(
+      id: 'direct-topic',
+      title: '直接表示Tier',
+      description: '',
+      tags: ['共有URL'],
+      category: 'その他',
+      creatorName: '作成者',
+      participants: 1,
+      items: [
+        TierItem(
+          id: 'direct-item',
+          topicId: 'direct-topic',
+          sortIndex: 0,
+          name: '直接取得',
+        ),
+      ],
+      community: {'direct-item': TierRank.s},
+    );
+  }
+
+  @override
   Future<TierTopic> saveTopic(TierTopic topic) async => topic;
 
   @override
   Future<void> setTopicPublic(String topicId, {required bool isPublic}) async {}
 
   @override
-  Future<void> deleteTopic(String topicId) async {}
+  Future<void> deleteTopic(String topicId) async {
+    if (failDeletion) throw StateError('delete failed');
+    deletedTopicIds.add(topicId);
+  }
 
   @override
   Future<void> saveSubmission(UserTierSubmission submission) async {

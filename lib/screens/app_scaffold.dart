@@ -1,19 +1,23 @@
 import 'package:flutter/material.dart';
 
 import '../l10n/app_localizations.dart';
+import '../services/app_state.dart';
 import '../theme/app_theme.dart';
 import '../utils/app_breakpoints.dart';
 import '../widgets/adsense_ad.dart';
 import '../widgets/common_widgets.dart';
+import 'account_sheet.dart';
 
 class AppScaffold extends StatelessWidget {
   const AppScaffold({
     super.key,
+    required this.appState,
     required this.index,
     required this.onSelected,
     required this.scrollController,
     required this.body,
   });
+  final AppState appState;
   final int index;
   final ValueChanged<int> onSelected;
   final ScrollController scrollController;
@@ -52,6 +56,7 @@ class AppScaffold extends StatelessWidget {
       final desktop = AppBreakpoints.isDesktop(constraints.maxWidth);
       if (desktop) {
         return _DesktopPortalScaffold(
+          appState: appState,
           width: constraints.maxWidth,
           index: index,
           onSelected: onSelected,
@@ -77,15 +82,12 @@ class AppScaffold extends StatelessWidget {
                   children: [
                     const BrandMark(cropTagline: true, width: 190, height: 50),
                     const Spacer(),
-                    IconButton(
-                      onPressed: () =>
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text(context.l10n.t('guestMessage')),
-                            ),
-                          ),
-                      icon: const Icon(Icons.person_outline_rounded),
-                      tooltip: context.l10n.t('guest'),
+                    AccountMenuButton(
+                      authSession: appState.authSession,
+                      onMyTier: () => onSelected(3),
+                      onSettings: () => onSelected(4),
+                      onSignIn: () => showAccountSheet(context, appState),
+                      onSignOut: appState.signOut,
                     ),
                   ],
                 ),
@@ -106,6 +108,7 @@ class AppScaffold extends StatelessWidget {
 
 class _DesktopPortalScaffold extends StatelessWidget {
   const _DesktopPortalScaffold({
+    required this.appState,
     required this.width,
     required this.index,
     required this.onSelected,
@@ -113,6 +116,7 @@ class _DesktopPortalScaffold extends StatelessWidget {
     required this.body,
   });
 
+  final AppState appState;
   final double width;
   final int index;
   final ValueChanged<int> onSelected;
@@ -160,6 +164,7 @@ class _DesktopPortalScaffold extends StatelessWidget {
                     SizedBox(
                       width: portalWidth,
                       child: _DesktopPortal(
+                        appState: appState,
                         index: index,
                         onSelected: onSelected,
                         body: MiddleMouseAutoScroll(
@@ -188,11 +193,13 @@ class _DesktopPortalScaffold extends StatelessWidget {
 
 class _DesktopPortal extends StatelessWidget {
   const _DesktopPortal({
+    required this.appState,
     required this.index,
     required this.onSelected,
     required this.body,
   });
 
+  final AppState appState;
   final int index;
   final ValueChanged<int> onSelected;
   final Widget body;
@@ -252,10 +259,12 @@ class _DesktopPortal extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(width: 4),
-                  IconButton(
-                    onPressed: () => onSelected(4),
-                    icon: const Icon(Icons.account_circle_outlined),
-                    tooltip: context.l10n.t('account'),
+                  AccountMenuButton(
+                    authSession: appState.authSession,
+                    onMyTier: () => onSelected(3),
+                    onSettings: () => onSelected(4),
+                    onSignIn: () => showAccountSheet(context, appState),
+                    onSignOut: appState.signOut,
                   ),
                 ],
               ),
@@ -312,6 +321,102 @@ class _DesktopPortal extends StatelessWidget {
       ),
     );
   }
+}
+
+enum _AccountMenuAction { myTier, settings, signOut, signIn }
+
+class AccountMenuButton extends StatelessWidget {
+  const AccountMenuButton({
+    super.key,
+    required this.authSession,
+    required this.onMyTier,
+    required this.onSettings,
+    required this.onSignIn,
+    required this.onSignOut,
+  });
+
+  final AuthSessionState authSession;
+  final VoidCallback onMyTier;
+  final VoidCallback onSettings;
+  final Future<void> Function() onSignIn;
+  final Future<void> Function() onSignOut;
+
+  Future<void> _handleSelected(_AccountMenuAction action) async {
+    switch (action) {
+      case _AccountMenuAction.myTier:
+        onMyTier();
+      case _AccountMenuAction.settings:
+        onSettings();
+      case _AccountMenuAction.signOut:
+        await onSignOut();
+      case _AccountMenuAction.signIn:
+        await onSignIn();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => PopupMenuButton<_AccountMenuAction>(
+    key: const ValueKey('account-menu-button'),
+    tooltip: context.l10n.t('account'),
+    icon: Icon(
+      authSession.isRegistered
+          ? Icons.account_circle_rounded
+          : Icons.person_outline_rounded,
+    ),
+    onSelected: _handleSelected,
+    itemBuilder: (context) => authSession.isRegistered
+        ? [
+            PopupMenuItem(
+              value: _AccountMenuAction.myTier,
+              child: _AccountMenuRow(
+                icon: Icons.view_agenda_outlined,
+                label: context.l10n.t('myTier'),
+              ),
+            ),
+            PopupMenuItem(
+              value: _AccountMenuAction.settings,
+              child: _AccountMenuRow(
+                icon: Icons.settings_outlined,
+                label: context.l10n.t('settings'),
+              ),
+            ),
+            PopupMenuItem(
+              value: _AccountMenuAction.signOut,
+              child: _AccountMenuRow(
+                icon: Icons.logout_rounded,
+                label: context.l10n.t('signOut'),
+              ),
+            ),
+          ]
+        : [
+            PopupMenuItem(
+              enabled: false,
+              child: _AccountMenuRow(
+                icon: Icons.person_outline_rounded,
+                label: context.l10n.t('guestMessage'),
+              ),
+            ),
+            PopupMenuItem(
+              value: _AccountMenuAction.signIn,
+              child: _AccountMenuRow(
+                icon: Icons.login_rounded,
+                label: context.l10n.t('signInOrRegister'),
+              ),
+            ),
+          ],
+  );
+}
+
+class _AccountMenuRow extends StatelessWidget {
+  const _AccountMenuRow({required this.icon, required this.label});
+
+  final IconData icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) => Row(
+    children: [Icon(icon, size: 20), const SizedBox(width: 12), Text(label)],
+  );
 }
 
 class _DesktopTopNavItem extends StatelessWidget {

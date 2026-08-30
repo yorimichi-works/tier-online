@@ -54,7 +54,7 @@ class _EmailVerificationPendingScreenState
       messenger.showSnackBar(
         SnackBar(content: Text(context.l10n.t('verificationCompleted'))),
       );
-      Navigator.of(context).pop();
+      Navigator.of(context).pop(true);
       return;
     }
     messenger.showSnackBar(
@@ -68,15 +68,12 @@ class _EmailVerificationPendingScreenState
     if (!mounted) return;
     setState(() => _resending = false);
     _startCooldown();
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          context.l10n.t(
-            ok ? 'verificationEmailResent' : 'verificationEmailSendFailed',
-          ),
-        ),
-      ),
-    );
+    final messageKey = ok
+        ? 'verificationEmailResent'
+        : 'verificationEmailSendFailed';
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(context.l10n.t(messageKey))));
   }
 
   @override
@@ -102,8 +99,9 @@ class _EmailVerificationPendingScreenState
                   Text(
                     context.l10n.t('verifyEmailTitle'),
                     textAlign: TextAlign.center,
-                    style: Theme.of(context).textTheme.headlineSmall
-                        ?.copyWith(fontWeight: FontWeight.w900),
+                    style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                      fontWeight: FontWeight.w900,
+                    ),
                   ),
                   const SizedBox(height: 12),
                   Text(
@@ -115,9 +113,7 @@ class _EmailVerificationPendingScreenState
                     Text(
                       email,
                       textAlign: TextAlign.center,
-                      style: Theme.of(
-                        context,
-                      ).textTheme.titleMedium?.copyWith(
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
                         fontWeight: FontWeight.w700,
                       ),
                     ),

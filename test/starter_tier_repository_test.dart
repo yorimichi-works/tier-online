@@ -14,6 +14,8 @@ void main() {
       expect(topics.map((topic) => topic.id).toSet(), hasLength(10));
       for (final topic in topics) {
         expect(topic.isPublic, isTrue);
+        expect(topic.creatorName, 'tier_online');
+        expect(topic.creatorId, 'tier_online');
         expect(topic.moderationStatus, 'approved');
         expect(topic.likeCount, 0);
         expect(topic.items, hasLength(9));

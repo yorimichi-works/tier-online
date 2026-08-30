@@ -47,6 +47,11 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // 問い合わせ/削除依頼はsubmitContactRequest(Admin SDK)経由のみで作成する。
+    match /contactRequests/{id} {
+      allow read, write: if false;
+    }
+
     match /users/{userId} {
       allow read: if signedIn() && request.auth.uid == userId;
       allow create, update: if signedIn() && request.auth.uid == userId &&

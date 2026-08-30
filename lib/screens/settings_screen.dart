@@ -16,6 +16,94 @@ class SettingsScreen extends StatelessWidget {
   });
   final AppState appState;
   final ScrollController? scrollController;
+
+  Future<void> _deleteAccount(BuildContext context) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(context.l10n.t('deleteAccountConfirmTitle')),
+        content: Text(context.l10n.t('deleteAccountConfirmBody')),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: Text(context.l10n.t('cancel')),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(context).colorScheme.error,
+            ),
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: Text(context.l10n.t('deleteAccount')),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !context.mounted) return;
+
+    String? password;
+    if (appState.accountUsesPassword) {
+      final controller = TextEditingController();
+      password = await showDialog<String>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: Text(context.l10n.t('reauthenticateTitle')),
+          content: TextField(
+            controller: controller,
+            autofocus: true,
+            obscureText: true,
+            decoration: InputDecoration(labelText: context.l10n.t('password')),
+            onSubmitted: (value) => Navigator.pop(dialogContext, value),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: Text(context.l10n.t('cancel')),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, controller.text),
+              child: Text(context.l10n.t('confirm')),
+            ),
+          ],
+        ),
+      );
+      controller.dispose();
+      if (password == null || !context.mounted) return;
+    }
+
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => PopScope(
+        canPop: false,
+        child: AlertDialog(
+          content: Row(
+            children: [
+              const CircularProgressIndicator(),
+              const SizedBox(width: 18),
+              Expanded(child: Text(context.l10n.t('deletingAccount'))),
+            ],
+          ),
+        ),
+      ),
+    );
+    final result = await appState.deleteAccount(password: password);
+    if (!context.mounted) return;
+    Navigator.of(context, rootNavigator: true).pop();
+    final message = switch (result) {
+      AccountDeletionStatus.success => context.l10n.t('deleteAccountSuccess'),
+      AccountDeletionStatus.cancelled => context.l10n.t(
+        'reauthenticationCancelled',
+      ),
+      AccountDeletionStatus.wrongPassword => context.l10n.t(
+        'authErrorWrongPassword',
+      ),
+      AccountDeletionStatus.failed => context.l10n.t('deleteAccountFailure'),
+    };
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
+  }
+
   @override
   Widget build(BuildContext context) => SingleChildScrollView(
     controller: scrollController,
@@ -33,26 +121,48 @@ class SettingsScreen extends StatelessWidget {
           const SizedBox(height: 20),
           if (appState.authEnabled) ...[
             Card(
-              child: ListTile(
-                leading: Icon(
-                  appState.isAnonymous
-                      ? Icons.person_outline_rounded
-                      : Icons.verified_user_rounded,
-                ),
-                title: Text(
-                  appState.isAnonymous
-                      ? context.l10n.t('notSignedIn')
-                      : '${context.l10n.t('signedInAs')} ${appState.userEmail}',
-                ),
-                trailing: appState.isAnonymous
-                    ? FilledButton(
-                        onPressed: () => showAccountSheet(context, appState),
-                        child: Text(context.l10n.t('createAccount')),
-                      )
-                    : TextButton(
-                        onPressed: appState.signOut,
-                        child: Text(context.l10n.t('signOut')),
+              child: Column(
+                children: [
+                  ListTile(
+                    leading: Icon(
+                      appState.isAnonymous
+                          ? Icons.person_outline_rounded
+                          : Icons.verified_user_rounded,
+                    ),
+                    title: Text(
+                      appState.isAnonymous
+                          ? context.l10n.t('notSignedIn')
+                          : '${context.l10n.t('signedInAs')} ${appState.userEmail}',
+                    ),
+                    trailing: appState.isAnonymous
+                        ? FilledButton(
+                            onPressed: () =>
+                                showAccountSheet(context, appState),
+                            child: Text(context.l10n.t('createAccount')),
+                          )
+                        : TextButton(
+                            onPressed: appState.signOut,
+                            child: Text(context.l10n.t('signOut')),
+                          ),
+                  ),
+                  if (!appState.isAnonymous) ...[
+                    const Divider(height: 1),
+                    ListTile(
+                      leading: Icon(
+                        Icons.delete_forever_outlined,
+                        color: Theme.of(context).colorScheme.error,
                       ),
+                      title: Text(
+                        context.l10n.t('deleteAccount'),
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.error,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      onTap: () => _deleteAccount(context),
+                    ),
+                  ],
+                ],
               ),
             ),
             const SizedBox(height: 16),
@@ -69,7 +179,7 @@ class SettingsScreen extends StatelessWidget {
                     for (final locale in AppLocale.values)
                       DropdownMenuItem(
                         value: locale,
-                        child: Text(locale.nativeName),
+                        child: Text(context.l10n.languageName(locale)),
                       ),
                   ],
                   onChanged: (value) {
@@ -93,6 +203,14 @@ class SettingsScreen extends StatelessWidget {
                     DropdownMenuItem(
                       value: 'KR',
                       child: Text(context.l10n.t('korea')),
+                    ),
+                    DropdownMenuItem(
+                      value: 'TW',
+                      child: Text(context.l10n.t('taiwan')),
+                    ),
+                    DropdownMenuItem(
+                      value: 'BR',
+                      child: Text(context.l10n.t('brazil')),
                     ),
                     DropdownMenuItem(
                       value: 'GLOBAL',
@@ -191,6 +309,39 @@ class SettingsScreen extends StatelessWidget {
                   height: 1.6,
                 ),
               ),
+            ),
+          ),
+          const SizedBox(height: 16),
+          Card(
+            child: Column(
+              children: [
+                ListTile(
+                  leading: const Icon(Icons.description_outlined),
+                  title: Text(context.l10n.t('termsTitle')),
+                  trailing: const Icon(Icons.chevron_right_rounded),
+                  onTap: () => Navigator.of(
+                    context,
+                  ).pushNamed('/${appState.locale.code}/terms'),
+                ),
+                const Divider(height: 1),
+                ListTile(
+                  leading: const Icon(Icons.privacy_tip_outlined),
+                  title: Text(context.l10n.t('privacyTitle')),
+                  trailing: const Icon(Icons.chevron_right_rounded),
+                  onTap: () => Navigator.of(
+                    context,
+                  ).pushNamed('/${appState.locale.code}/privacy'),
+                ),
+                const Divider(height: 1),
+                ListTile(
+                  leading: const Icon(Icons.mail_outline_rounded),
+                  title: Text(context.l10n.t('contactTitle')),
+                  trailing: const Icon(Icons.chevron_right_rounded),
+                  onTap: () => Navigator.of(
+                    context,
+                  ).pushNamed('/${appState.locale.code}/contact'),
+                ),
+              ],
             ),
           ),
         ],

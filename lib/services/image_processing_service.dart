@@ -7,8 +7,17 @@ class ImageProcessingService {
   final int maxDimension;
   final int quality;
 
-  Future<Uint8List> prepareTierCard(Uint8List source) =>
-      compute(_prepare, _ImageProcessingRequest(source, maxDimension, quality));
+  // Web版はcompute()(Web Worker経由)を使わない: iOS Safariなど一部の
+  // モバイルブラウザで、ワーカーの起動に失敗しても例外が伝播せず、Futureが
+  // 永久に解決しないまま無反応になる不具合が確認されているため。画像1枚
+  // あたりの処理は軽量なので、メインアイソレートで直接実行しても体感できる
+  // ほどのジャンクは生じない。
+  Future<Uint8List> prepareTierCard(Uint8List source) {
+    final request = _ImageProcessingRequest(source, maxDimension, quality);
+    return kIsWeb
+        ? Future(() => _prepare(request))
+        : compute(_prepare, request);
+  }
 }
 
 class _ImageProcessingRequest {

@@ -20,6 +20,11 @@
       "**/node_modules/**"
     ],
     "rewrites": [
+      { "source": "/sitemap.xml", "function": "sitemap" },
+      { "source": "/{ja,ko,zh-tw,pt-br,en}/tier/**", "function": "renderTopic" },
+      { "source": "/{ja,ko,zh-tw,pt-br,en}/**", "function": "renderHome" },
+      { "source": "/{ja,ko,zh-tw,pt-br,en}", "function": "renderHome" },
+      { "source": "/", "function": "renderHome" },
       { "source": "**", "destination": "/index.html" }
     ],
     "headers": [
@@ -48,13 +53,13 @@
         ]
       },
       {
-        "source": "/{ja,ko,en}",
+        "source": "/{ja,ko,zh-tw,pt-br,en}",
         "headers": [
           { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }
         ]
       },
       {
-        "source": "/{ja,ko,en}/**",
+        "source": "/{ja,ko,zh-tw,pt-br,en}/**",
         "headers": [
           { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }
         ]

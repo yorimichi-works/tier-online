@@ -93,4 +93,19 @@ class LocalTierStore {
       jsonEncode(posts.map(TierSerialization.talkToJson).toList()),
     );
   }
+
+  Future<void> clearUserData() async {
+    final preferences = await SharedPreferences.getInstance();
+    final keys = preferences.getKeys().where(
+      (key) =>
+          key == _topicIdsKey ||
+          key.startsWith('localTopic.') ||
+          key.startsWith('submission.') ||
+          key.startsWith('talks.') ||
+          key.startsWith('placements.'),
+    );
+    for (final key in keys.toList(growable: false)) {
+      await preferences.remove(key);
+    }
+  }
 }

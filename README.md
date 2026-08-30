@@ -4,7 +4,7 @@
 
 ## 多言語・地域対応
 
-初期対応言語は日本語 (`ja`)、韓国語 (`ko`)、英語 (`en`) です。Web URLは
+対応言語は日本語 (`ja`)、韓国語 (`ko`)、英語 (`en`)、繁体字中国語 (`zh-tw`)、ブラジルポルトガル語 (`pt-br`) です。Web URLは
 `/{locale}/` を先頭に持ち、Tier詳細は `/{locale}/tier/{tierId}` で直接開けます。
 表示言語 (`preferredLocale`) と利用地域 (`region`) は独立した設定として端末と
 Firestoreの `users/{uid}` に保存されます。
@@ -60,7 +60,8 @@ flutter run -d chrome \
   --dart-define=FIREBASE_MESSAGING_SENDER_ID=... \
   --dart-define=FIREBASE_PROJECT_ID=... \
   --dart-define=FIREBASE_AUTH_DOMAIN=... \
-  --dart-define=FIREBASE_STORAGE_BUCKET=...
+  --dart-define=FIREBASE_STORAGE_BUCKET=... \
+  --dart-define=FIREBASE_APP_CHECK_WEB_SITE_KEY=...
 ```
 
 設定済みの場合は匿名認証し、テーマ、画像、評価、集合Tier、語る投稿・返信をクラウド同期します。通信エラー時も端末内への保存は継続します。
@@ -76,6 +77,8 @@ firebase deploy --only firestore:rules,storage,functions
 ```
 
 Cloud FunctionsやStorageの利用には、Firebaseプロジェクト側で請求先設定が必要になる場合があります。
+App Checkの段階的な有効化と予算アラートの設定手順は
+[`docs/firebase-app-check-and-budget.md`](docs/firebase-app-check-and-budget.md)を参照してください。
 
 ### Google画像検索を使う
 

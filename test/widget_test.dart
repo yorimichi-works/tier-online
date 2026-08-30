@@ -1,11 +1,16 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:tier_table_online/main.dart';
 import 'package:tier_table_online/l10n/app_localizations.dart';
 import 'package:tier_table_online/models/tier_models.dart';
+import 'package:tier_table_online/repositories/cloud_tier_repository.dart';
 import 'package:tier_table_online/repositories/dummy_tier_repository.dart';
+import 'package:tier_table_online/repositories/starter_tier_repository.dart';
 import 'package:tier_table_online/screens/create_screen.dart';
+import 'package:tier_table_online/screens/app_scaffold.dart';
+import 'package:tier_table_online/screens/email_action_screen.dart';
 import 'package:tier_table_online/screens/tier_builder_screen.dart';
 import 'package:tier_table_online/screens/tier_result_screen.dart';
 import 'package:tier_table_online/screens/tier_publish_preview_screen.dart';
@@ -25,11 +30,140 @@ void main() {
     expect(theme.colorScheme.onErrorContainer, const Color(0xFFFFE8EC));
   });
 
+  testWidgets('ゲストのアカウントメニューはログイン後すぐ登録済み表示になる', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(390, 844));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(const _AuthMenuHarness());
+
+    await tester.tap(find.byKey(const ValueKey('account-menu-button')));
+    await tester.pumpAndSettle();
+    expect(find.text('ゲストとして利用中です'), findsOneWidget);
+    expect(find.text('ログイン / 新規登録'), findsOneWidget);
+    expect(find.text('ログアウト'), findsNothing);
+
+    await tester.tap(find.text('ログイン / 新規登録'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('account-menu-button')));
+    await tester.pumpAndSettle();
+    expect(find.text('ゲストとして利用中です'), findsNothing);
+    expect(find.text('マイTier'), findsOneWidget);
+    expect(find.text('設定'), findsOneWidget);
+    expect(find.text('ログアウト'), findsOneWidget);
+  });
+
+  testWidgets('登録済みメニューは各画面幅でゲスト表示せずログアウト後すぐ切り替わる', (tester) async {
+    for (final size in const [
+      Size(390, 844),
+      Size(430, 932),
+      Size(1440, 1000),
+    ]) {
+      await tester.binding.setSurfaceSize(size);
+      var myTierOpened = false;
+      await tester.pumpWidget(
+        _AuthMenuHarness(
+          key: ValueKey(size),
+          initiallyRegistered: true,
+          onMyTier: () => myTierOpened = true,
+        ),
+      );
+
+      await tester.tap(find.byKey(const ValueKey('account-menu-button')));
+      await tester.pumpAndSettle();
+      expect(find.text('ゲストとして利用中です'), findsNothing);
+      expect(find.text('マイTier'), findsOneWidget);
+      expect(find.text('設定'), findsOneWidget);
+      expect(find.text('ログアウト'), findsOneWidget);
+
+      await tester.tap(find.text('マイTier'));
+      await tester.pumpAndSettle();
+      expect(myTierOpened, isTrue);
+
+      await tester.tap(find.byKey(const ValueKey('account-menu-button')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('ログアウト'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('account-menu-button')));
+      await tester.pumpAndSettle();
+      expect(find.text('ゲストとして利用中です'), findsOneWidget);
+      expect(find.text('ログイン / 新規登録'), findsOneWidget);
+      expect(find.text('ログアウト'), findsNothing);
+
+      await tester.tapAt(Offset.zero);
+      await tester.pumpAndSettle();
+    }
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+  });
+
+  testWidgets('独自メール確認ページは確認完了後に元のブラウザへ戻る案内を表示する', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(390, 844));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final appState = AppState(DummyTierRepository());
+    await tester.pumpWidget(
+      MaterialApp(
+        locale: const Locale('ja'),
+        supportedLocales: AppLocalizations.supportedLocales,
+        localizationsDelegates: const [
+          AppLocalizations.delegate,
+          GlobalMaterialLocalizations.delegate,
+          GlobalWidgetsLocalizations.delegate,
+          GlobalCupertinoLocalizations.delegate,
+        ],
+        theme: buildDarkAppTheme(),
+        home: EmailActionScreen(
+          appState: appState,
+          actionUri: Uri.parse(
+            'https://tier-online.web.app/ja/auth/action'
+            '?mode=verifyEmail&oobCode=test-code',
+          ),
+          applyActionCode: (code) async => code == 'test-code',
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('メールアドレスの確認が完了しました'), findsOneWidget);
+    expect(find.text('元のブラウザに戻って「確認しました」を押してください。'), findsOneWidget);
+    expect(find.text('閉じる'), findsOneWidget);
+    expect(find.byType(BrandMark), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('期限切れのメール確認リンクは再送案内を表示する', (tester) async {
+    final appState = AppState(DummyTierRepository());
+    await tester.pumpWidget(
+      MaterialApp(
+        locale: const Locale('ja'),
+        supportedLocales: AppLocalizations.supportedLocales,
+        localizationsDelegates: const [
+          AppLocalizations.delegate,
+          GlobalMaterialLocalizations.delegate,
+          GlobalWidgetsLocalizations.delegate,
+          GlobalCupertinoLocalizations.delegate,
+        ],
+        home: EmailActionScreen(
+          appState: appState,
+          actionUri: Uri.parse(
+            'https://tier-online.web.app/ja/auth/action'
+            '?mode=verifyEmail&oobCode=expired-code',
+          ),
+          applyActionCode: (_) async => false,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('この確認リンクは使用できません'), findsOneWidget);
+    expect(find.textContaining('確認メールを再送してください'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('390pxでホームからTier作成画面まで進める', (tester) async {
     await tester.binding.setSurfaceSize(const Size(390, 844));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     await tester.pumpWidget(
-      TierTableOnlineApp(appState: AppState(DummyTierRepository())),
+      TierTableOnlineApp(
+        appState: AppState(DummyTierRepository(), trustLocalSharedRoutes: true),
+      ),
     );
 
     expect(find.byType(NavigationBar), findsOneWidget);
@@ -69,6 +203,33 @@ void main() {
     await tester.tap(find.text('S').last);
     await tester.pumpAndSettle();
     expect(find.text('1 / 12'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('共有URLからTier詳細を直接表示する', (tester) async {
+    final state = AppState(
+      StarterTierRepository(),
+      initialPath: '/ja/tier/starter-pasta',
+    );
+    await tester.pumpWidget(TierTableOnlineApp(appState: state));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(TopicDetailScreen), findsOneWidget);
+    expect(find.text('美味しいパスタTier'), findsWidgets);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('存在しない共有URLは404表示になる', (tester) async {
+    final state = AppState(
+      DummyTierRepository(),
+      cloudRepository: _MissingTopicCloudRepository(),
+      initialPath: '/ja/tier/not-found',
+    );
+    await tester.pumpWidget(TierTableOnlineApp(appState: state));
+    await tester.pumpAndSettle();
+
+    expect(find.text('削除された、または非公開のTier表です。'), findsOneWidget);
+    expect(find.text('ホーム'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
@@ -123,6 +284,50 @@ void main() {
     expect(find.byType(NavigationBar), findsNothing);
     expect(find.text('広告掲載スペース'), findsNothing);
     expect(find.text('メニュー'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('新規TierをマイTier画面から削除できる', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(430, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final repository = DummyTierRepository();
+    final state = AppState(repository);
+    await state.initialize();
+    const topic = TierTopic(
+      id: 'local-delete-test',
+      title: '削除テストTier',
+      description: '削除確認用',
+      tags: ['テスト'],
+      category: 'その他',
+      creatorName: 'あなた',
+      participants: 1,
+      items: [
+        TierItem(
+          id: 'local-delete-test-0',
+          topicId: 'local-delete-test',
+          sortIndex: 0,
+          name: 'テスト項目',
+        ),
+      ],
+      community: {'local-delete-test-0': TierRank.s},
+    );
+    await state.addTopic(topic, const {
+      TierRank.s: ['local-delete-test-0'],
+    });
+    await tester.pumpWidget(TierTableOnlineApp(appState: state));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('マイTier').last);
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Tier削除'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Tier削除'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('削除').last);
+    await tester.pumpAndSettle();
+
+    expect(repository.getById(topic.id), isNull);
+    expect(find.text('Tier表を削除しました'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
@@ -248,6 +453,7 @@ void main() {
     expect(find.text('複数の画像を選ぶ'), findsOneWidget);
     expect(find.text('名前でカードを追加'), findsOneWidget);
     expect(find.textContaining('権利を保有している画像'), findsOneWidget);
+    expect(find.text('名前付きのアップロード画像をみんなで再利用する'), findsOneWidget);
 
     await tester.tap(find.text('名前でカードを追加'));
     await tester.pumpAndSettle();
@@ -256,7 +462,7 @@ void main() {
     await tester.enterText(find.byType(TextField).last, '鬼\n天狗\n河童');
     await tester.tap(find.text('まとめて追加'));
     await tester.pumpAndSettle();
-    expect(find.text('Web検索から画像を取得しますか？'), findsOneWidget);
+    expect(find.text('無料の画像候補を取得しますか？'), findsOneWidget);
     await tester.tap(find.text('あとで'));
     await tester.pumpAndSettle();
     expect(find.text('鬼'), findsOneWidget);
@@ -295,7 +501,10 @@ void main() {
   testWidgets('語るへの返信は任意の賛成・異議ありを付けられる', (tester) async {
     await tester.binding.setSurfaceSize(const Size(430, 900));
     addTearDown(() => tester.binding.setSurfaceSize(null));
-    final appState = AppState(DummyTierRepository());
+    final appState = AppState(
+      DummyTierRepository(),
+      trustLocalSharedRoutes: true,
+    );
     await appState.initialize();
     await tester.pumpWidget(TierTableOnlineApp(appState: appState));
 
@@ -338,7 +547,10 @@ void main() {
   testWidgets('コメントを確認後に通報できる', (tester) async {
     await tester.binding.setSurfaceSize(const Size(430, 900));
     addTearDown(() => tester.binding.setSurfaceSize(null));
-    final appState = AppState(DummyTierRepository());
+    final appState = AppState(
+      DummyTierRepository(),
+      trustLocalSharedRoutes: true,
+    );
     await appState.initialize();
     await tester.pumpWidget(TierTableOnlineApp(appState: appState));
 
@@ -477,7 +689,7 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('世界のTierを有効にすると日英韓を複数選択できる', (tester) async {
+  testWidgets('世界のTierを有効にすると5言語を複数選択できる', (tester) async {
     await tester.binding.setSurfaceSize(const Size(430, 1200));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     final repository = DummyTierRepository()
@@ -510,9 +722,11 @@ void main() {
     await tester.tap(find.text('世界のTierを見る'));
     await tester.pumpAndSettle();
     expect(find.text('日本語'), findsOneWidget);
-    expect(find.text('한국어'), findsOneWidget);
-    expect(find.text('English'), findsOneWidget);
-    await tester.tap(find.text('한국어'));
+    expect(find.text('韓国語'), findsOneWidget);
+    expect(find.text('英語'), findsOneWidget);
+    expect(find.text('繁体字'), findsOneWidget);
+    expect(find.text('ポルトガル語'), findsOneWidget);
+    await tester.tap(find.text('韓国語'));
     await tester.pumpAndSettle();
     expect(find.text('한국 티어'), findsWidgets);
   });
@@ -592,11 +806,17 @@ void main() {
     expect(find.text('あなたのTierが完成！'), findsOneWidget);
   });
 
-  testWidgets('/ja/・/ko/・/en/ が対応言語のUIを表示する', (tester) async {
+  testWidgets('5言語URLが対応言語のUIを表示する', (tester) async {
     await tester.binding.setSurfaceSize(const Size(390, 844));
     addTearDown(() => tester.binding.setSurfaceSize(null));
 
-    for (final entry in const [('ja', 'ホーム'), ('ko', '홈'), ('en', 'Home')]) {
+    for (final entry in const [
+      ('ja', 'ホーム'),
+      ('ko', '홈'),
+      ('zh-tw', '首頁'),
+      ('pt-br', 'Início'),
+      ('en', 'Home'),
+    ]) {
       SharedPreferences.setMockInitialValues({});
       final state = AppState(
         DummyTierRepository(),
@@ -610,7 +830,7 @@ void main() {
     }
   });
 
-  testWidgets('狭い画面でも3言語のテーマ切替とロゴが崩れない', (tester) async {
+  testWidgets('狭い画面でも5言語のテーマ切替とロゴが崩れない', (tester) async {
     await tester.binding.setSurfaceSize(const Size(320, 800));
     addTearDown(() => tester.binding.setSurfaceSize(null));
 
@@ -626,6 +846,18 @@ void main() {
         settings: '설정',
         system: '기기 설정',
         asset: 'assets/branding/tier-logo-ko.png',
+      ),
+      (
+        code: 'zh-tw',
+        settings: '設定',
+        system: '跟隨系統',
+        asset: 'assets/branding/tier-logo-en.png',
+      ),
+      (
+        code: 'pt-br',
+        settings: 'Configurações',
+        system: 'Sistema',
+        asset: 'assets/branding/tier-logo-en.png',
       ),
       (
         code: 'en',
@@ -660,4 +892,75 @@ void main() {
       expect(tester.takeException(), isNull);
     }
   });
+}
+
+class _AuthMenuHarness extends StatefulWidget {
+  const _AuthMenuHarness({
+    super.key,
+    this.initiallyRegistered = false,
+    this.onMyTier,
+  });
+
+  final bool initiallyRegistered;
+  final VoidCallback? onMyTier;
+
+  @override
+  State<_AuthMenuHarness> createState() => _AuthMenuHarnessState();
+}
+
+class _AuthMenuHarnessState extends State<_AuthMenuHarness> {
+  late AuthSessionState _authSession;
+
+  @override
+  void initState() {
+    super.initState();
+    _authSession = widget.initiallyRegistered
+        ? const AuthSessionState.registered(email: 'user@example.com')
+        : const AuthSessionState.guest();
+  }
+
+  @override
+  Widget build(BuildContext context) => MaterialApp(
+    locale: const Locale('ja'),
+    supportedLocales: AppLocalizations.supportedLocales,
+    localizationsDelegates: const [
+      AppLocalizations.delegate,
+      GlobalMaterialLocalizations.delegate,
+      GlobalWidgetsLocalizations.delegate,
+      GlobalCupertinoLocalizations.delegate,
+    ],
+    home: Scaffold(
+      body: Align(
+        alignment: Alignment.topRight,
+        child: AccountMenuButton(
+          authSession: _authSession,
+          onMyTier: widget.onMyTier ?? () {},
+          onSettings: () {},
+          onSignIn: () async {
+            setState(() {
+              _authSession = const AuthSessionState.registered(
+                email: 'user@example.com',
+              );
+            });
+          },
+          onSignOut: () async {
+            setState(() {
+              _authSession = const AuthSessionState.guest();
+            });
+          },
+        ),
+      ),
+    ),
+  );
+}
+
+class _MissingTopicCloudRepository implements CloudTierRepository {
+  @override
+  String get currentUserId => 'test-user';
+
+  @override
+  Future<TierTopic?> loadTopic(String topicId) async => null;
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }

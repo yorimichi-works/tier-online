@@ -84,7 +84,7 @@ class WorldLanguageFilter extends StatelessWidget {
                           FilterChip(
                             selected: selected.contains(locale),
                             showCheckmark: true,
-                            label: Text(locale.nativeName),
+                            label: Text(context.l10n.languageName(locale)),
                             onSelected: (value) =>
                                 onLanguageChanged(locale, value),
                           ),
@@ -239,7 +239,7 @@ class CategoryFilterChip extends StatelessWidget {
     return Semantics(
       button: true,
       selected: selected,
-      label: '$labelカテゴリー',
+      label: label,
       child: Material(
         color: selected ? AppColors.cyan : Colors.transparent,
         shape: StadiumBorder(
@@ -368,6 +368,8 @@ class BrandMark extends StatelessWidget {
   String _assetFor(AppLocale locale) => switch (locale) {
     AppLocale.ja => 'assets/branding/tier-logo.png',
     AppLocale.ko => 'assets/branding/tier-logo-ko.png',
+    AppLocale.zhTw => 'assets/branding/tier-logo-en.png',
+    AppLocale.ptBr => 'assets/branding/tier-logo-en.png',
     AppLocale.en => 'assets/branding/tier-logo-en.png',
   };
 

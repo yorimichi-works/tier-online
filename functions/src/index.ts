@@ -1,10 +1,15 @@
 import {initializeApp} from "firebase-admin/app";
+import {getAuth} from "firebase-admin/auth";
 import {FieldValue, getFirestore} from "firebase-admin/firestore";
+import {getStorage} from "firebase-admin/storage";
+import {setGlobalOptions} from "firebase-functions/v2";
 import {onDocumentWritten} from "firebase-functions/v2/firestore";
 import {HttpsError, onCall} from "firebase-functions/v2/https";
-import {defineSecret} from "firebase-functions/params";
+import {defineBoolean} from "firebase-functions/params";
+import {createHash, randomUUID} from "node:crypto";
 
 import {assertAdmin, loadNgWordConfig, updateNgWordConfigForAdmin} from "./adminConfig";
+import {deleteAccountData, deleteSharedImagesForTopic} from "./accountDeletion";
 import {aggregateTier, Placements} from "./aggregation";
 import {
   computeDailyCreateUpdate,
@@ -16,13 +21,19 @@ import {
 } from "./dailyLimit";
 import {moderateText} from "./moderation";
 import {checkAndConsume, computeRateLimitUpdate, loadLimits, rateLimitRef} from "./rateLimit";
+import {assertTierCreationAllowed} from "./tierCreationPolicy";
 
 initializeApp();
+// 小規模運用で突発アクセスがそのまま大量インスタンス化しないよう上限を置く。
+// minInstancesは既定の0のままなので、待機中の固定費は発生しない。
+setGlobalOptions({maxInstances: 5});
 
-export {renderTopic, sitemap} from "./seo";
+// App Checkはクライアントを先に配布してメトリクスを確認してから強制する。
+// Firebase Functions parameter ENFORCE_APP_CHECK=true で全Callableを一括強制できる。
+const enforceAppCheck = defineBoolean("ENFORCE_APP_CHECK", {default: false});
+const callableOptions = {enforceAppCheck};
 
-const googleSearchApiKey = defineSecret("GOOGLE_SEARCH_API_KEY");
-const googleSearchEngineId = defineSecret("GOOGLE_SEARCH_ENGINE_ID");
+export {renderHome, renderTopic, sitemap} from "./seo";
 
 function isAnonymousRequest(authToken: {firebase?: {sign_in_provider?: string}}): boolean {
   return authToken.firebase?.sign_in_provider === "anonymous";
@@ -48,11 +59,110 @@ type ImageSearchResult = {
   sourceUrl?: string;
 };
 
+const SHARED_IMAGE_COLLECTION = "sharedItemImages";
+const STARTER_CREATOR = {
+  creatorName: "tier_online",
+  creatorId: "tier_online",
+  createdByAnonymous: false,
+};
+
+function starterCreatorFields(topicId: string): Record<string, unknown> {
+  return topicId.startsWith("starter-") ? STARTER_CREATOR : {};
+}
+
+export function normalizeImageName(value: string): string {
+  return value.normalize("NFKC").trim().toLocaleLowerCase().replace(/\s+/gu, " ");
+}
+
+export function sharedImageKey(value: string, locale: string): string {
+  return createHash("sha256")
+    .update(`${locale}:${normalizeImageName(value)}`)
+    .digest("hex");
+}
+
+function firebaseDownloadUrl(
+  bucketName: string,
+  storagePath: string,
+  token: string,
+): string {
+  return `https://firebasestorage.googleapis.com/v0/b/${bucketName}/o/` +
+    `${encodeURIComponent(storagePath)}?alt=media&token=${token}`;
+}
+
+async function cacheSharedUploadedImages(params: {
+  uid: string;
+  topicId: string;
+  locale: string;
+  items: PublishItem[];
+}): Promise<void> {
+  const firestore = getFirestore();
+  const bucket = getStorage().bucket();
+  await Promise.all(params.items.map(async (item) => {
+    const name = item.name?.trim();
+    if (!item.id || !name) return;
+    const key = sharedImageKey(name, params.locale);
+    const cacheReference = firestore.collection(SHARED_IMAGE_COLLECTION).doc(key);
+    if ((await cacheReference.get()).exists) return;
+
+    // Only images uploaded for this exact topic are shareable. Asset images and
+    // third-party URLs are intentionally excluded from the shared cache.
+    const sourcePath = `users/${params.uid}/topics/${params.topicId}/items/${item.id}.jpg`;
+    const source = bucket.file(sourcePath);
+    const [exists] = await source.exists();
+    if (!exists) return;
+
+    const destinationPath = `shared-item-images/${key}.jpg`;
+    const destination = bucket.file(destinationPath);
+    const token = randomUUID();
+    await source.copy(destination);
+    await destination.setMetadata({
+      cacheControl: "public,max-age=31536000,immutable",
+      metadata: {firebaseStorageDownloadTokens: token},
+    });
+    await cacheReference.create({
+      normalizedName: normalizeImageName(name),
+      displayName: name,
+      locale: params.locale,
+      imageUrl: firebaseDownloadUrl(bucket.name, destinationPath, token),
+      storagePath: destinationPath,
+      sourceTopicId: params.topicId,
+      sourceItemId: item.id,
+      createdAt: FieldValue.serverTimestamp(),
+    });
+  }));
+}
+
+// 元Tierがブロック/削除された際、そこから共有領域へ複製された画像を検索
+// 対象から外す。物理削除はせず(誤ブロック解除時に復元できるよう)hiddenを
+// 立てるだけに留める。完全な削除は管理画面から個別に行う。
+async function hideSharedImagesForTopic(
+  topicId: string,
+  hidden: boolean,
+): Promise<void> {
+  const firestore = getFirestore();
+  const snapshot = await firestore
+    .collection(SHARED_IMAGE_COLLECTION)
+    .where("sourceTopicId", "==", topicId)
+    .get();
+  if (snapshot.empty) return;
+  const batch = firestore.batch();
+  for (const doc of snapshot.docs) {
+    batch.set(doc.ref, {
+      hidden,
+      hiddenReason: hidden ? "sourceTopicBlocked" : FieldValue.delete(),
+      updatedAt: FieldValue.serverTimestamp(),
+    }, {merge: true});
+  }
+  await batch.commit();
+}
+
 async function searchWikipediaImage(
   query: string,
   locale: string,
 ): Promise<ImageSearchResult> {
-  const language = ["ja", "ko", "en"].includes(locale) ? locale : "en";
+  const language = locale === "zh-tw" ? "zh" :
+    locale === "pt-br" ? "pt" :
+      ["ja", "ko", "en"].includes(locale) ? locale : "en";
   const url = new URL(`https://${language}.wikipedia.org/w/api.php`);
   url.search = new URLSearchParams({
     action: "query",
@@ -142,7 +252,7 @@ async function searchOpenverseImage(
 }
 
 export const searchTierItemImages = onCall(
-  {secrets: [googleSearchApiKey, googleSearchEngineId]},
+  callableOptions,
   async (request): Promise<{results: ImageSearchResult[]}> => {
     if (!request.auth) {
       throw new HttpsError("unauthenticated", "ログインが必要です");
@@ -167,56 +277,28 @@ export const searchTierItemImages = onCall(
         "一度に検索できるカード名は1〜30件です",
       );
     }
-    const locale = ["ja", "ko", "en"].includes(request.data?.locale) ?
+    const locale = ["ja", "ko", "zh-tw", "pt-br", "en"].includes(request.data?.locale) ?
       request.data.locale as string : "en";
-    const apiKey = googleSearchApiKey.value();
-    const engineId = googleSearchEngineId.value();
-    if (!apiKey || !engineId) {
-      throw new HttpsError(
-        "failed-precondition",
-        "Google画像検索が設定されていません",
-      );
-    }
-
-    const results = await Promise.all(names.map(async (query) => {
-      const url = new URL("https://customsearch.googleapis.com/customsearch/v1");
-      url.search = new URLSearchParams({
-        key: apiKey,
-        cx: engineId,
-        q: query,
-        searchType: "image",
-        num: "1",
-        safe: "active",
-        hl: locale,
-      }).toString();
-      const response = await fetch(url, {
-        headers: {"Accept": "application/json"},
-      });
-      if (!response.ok) {
-        const detail = await response.text();
-        // Custom Search JSON API denies access to some newer Google Cloud
-        // projects even when the API is enabled. Keep Google as the primary
-        // provider, then fall back to Openverse's mature-content-filtered,
-        // openly licensed search so card creation remains usable.
-        console.warn("Google image search failed; using Openverse", response.status, detail);
-        return searchOpenverseImage(query, locale);
+    const firestore = getFirestore();
+    const references = names.map((name) => firestore
+      .collection(SHARED_IMAGE_COLLECTION)
+      .doc(sharedImageKey(name, locale)));
+    const cachedSnapshots = await firestore.getAll(...references);
+    const results = await Promise.all(names.map(async (query, index) => {
+      const cached = cachedSnapshots[index].data();
+      const cachedImageUrl = cached?.imageUrl;
+      if (
+        cached?.hidden !== true &&
+        typeof cachedImageUrl === "string" && cachedImageUrl.length > 0
+      ) {
+        return {
+          query,
+          imageUrl: cachedImageUrl,
+          sourceUrl: typeof cached?.sourceTopicId === "string" ?
+            `/topics/${cached.sourceTopicId}` : undefined,
+        };
       }
-      const payload = await response.json() as {
-        items?: Array<{
-          link?: string;
-          image?: {contextLink?: string};
-        }>;
-      };
-      const first = payload.items?.[0];
-      if (!first?.link) {
-        console.warn("Google image search returned no results; using Openverse");
-        return searchOpenverseImage(query, locale);
-      }
-      return {
-        query,
-        imageUrl: first.link,
-        sourceUrl: first.image?.contextLink,
-      };
+      return searchOpenverseImage(query, locale);
     }));
     return {results};
   },
@@ -228,10 +310,12 @@ export const aggregateTopicTier = onDocumentWritten(
     const topicId = event.params.topicId;
     const database = getFirestore();
     const topic = database.collection("topics").doc(topicId);
-    const [items, submissions] = await Promise.all([
+    const [topicSnapshot, items, submissions] = await Promise.all([
+      topic.get(),
       topic.collection("items").orderBy("sortIndex").get(),
       topic.collection("submissions").get(),
     ]);
+    if (!topicSnapshot.exists || topicSnapshot.data()?.deleting === true) return;
     const itemIds = items.docs.map((document) => document.id);
     const submissionData = submissions.docs.map((document) => ({
       region: (document.data().region as string | undefined) ?? "JP",
@@ -243,6 +327,7 @@ export const aggregateTopicTier = onDocumentWritten(
     );
     await topic.set({
       ...aggregate,
+      ...starterCreatorFields(topicId),
       updatedAt: FieldValue.serverTimestamp(),
     }, {merge: true});
 
@@ -275,9 +360,12 @@ export const aggregateTopicLikes = onDocumentWritten(
   "topics/{topicId}/likes/{userId}",
   async (event) => {
     const topic = getFirestore().collection("topics").doc(event.params.topicId);
+    const topicSnapshot = await topic.get();
+    if (!topicSnapshot.exists || topicSnapshot.data()?.deleting === true) return;
     const snapshot = await topic.collection("likes").count().get();
     await topic.set({
       likeCount: snapshot.data().count,
+      ...starterCreatorFields(event.params.topicId),
       updatedAt: FieldValue.serverTimestamp(),
     }, {merge: true});
   },
@@ -293,7 +381,7 @@ type PublishItem = {
   isLanguageNeutral?: boolean;
 };
 
-export const publishTierTopic = onCall(async (request) => {
+export const publishTierTopic = onCall(callableOptions, async (request) => {
   if (!request.auth) {
     throw new HttpsError("unauthenticated", "ログインが必要です");
   }
@@ -309,6 +397,12 @@ export const publishTierTopic = onCall(async (request) => {
   const topicId = data.topicId;
   if (typeof topicId !== "string" || topicId.length === 0) {
     throw new HttpsError("invalid-argument", "topicIdが必要です");
+  }
+  if (topicId.startsWith("starter-")) {
+    throw new HttpsError(
+      "permission-denied",
+      "公式Tier表は編集できません",
+    );
   }
 
   const firestore = getFirestore();
@@ -346,6 +440,7 @@ export const publishTierTopic = onCall(async (request) => {
     //     終えてからでないと書き込みできない) ---
     const existing = await transaction.get(topicReference);
     const isNewTopic = !existing.exists;
+    assertTierCreationAllowed(isNewTopic, anonymous);
     if (existing.exists && existing.data()?.creatorId !== uid) {
       throw new HttpsError(
         "permission-denied",
@@ -394,6 +489,7 @@ export const publishTierTopic = onCall(async (request) => {
       community: data.community ?? {},
       isTrending: data.isTrending ?? false,
       isPublic: data.isPublic ?? true,
+      shareUploadedImages: data.shareUploadedImages ?? false,
       moderationStatus: moderation.status,
       moderationReasons: moderation.reasons,
       ...(isNewTopic ?
@@ -431,13 +527,31 @@ export const publishTierTopic = onCall(async (request) => {
     };
   });
 
+  if (
+    data.isPublic !== false &&
+    data.shareUploadedImages === true
+  ) {
+    try {
+      await cacheSharedUploadedImages({
+        uid,
+        topicId,
+        locale: ["ja", "ko", "zh-tw", "pt-br", "en"].includes(data.contentLanguage) ?
+          data.contentLanguage : "en",
+        items,
+      });
+    } catch (error) {
+      // Publishing must still succeed if optional cache contribution fails.
+      console.error("Failed to cache shared item images", error);
+    }
+  }
+
   return {
     moderationStatus: moderation.status,
     reportCount: result.reportCount,
   };
 });
 
-export const deleteTierTopic = onCall(async (request) => {
+export const deleteTierTopic = onCall(callableOptions, async (request) => {
   if (!request.auth) {
     throw new HttpsError("unauthenticated", "ログインが必要です");
   }
@@ -445,22 +559,67 @@ export const deleteTierTopic = onCall(async (request) => {
   if (typeof topicId !== "string" || topicId.length === 0) {
     throw new HttpsError("invalid-argument", "topicIdが必要です");
   }
+  if (topicId.startsWith("starter-")) {
+    throw new HttpsError(
+      "permission-denied",
+      "公式Tier表は削除できません",
+    );
+  }
 
   const firestore = getFirestore();
   const reference = firestore.collection("topics").doc(topicId);
   const snapshot = await reference.get();
-  if (!snapshot.exists) return {ok: true};
-  if (snapshot.data()?.creatorId !== request.auth.uid) {
+  if (snapshot.exists && snapshot.data()?.creatorId !== request.auth.uid) {
     throw new HttpsError(
       "permission-denied",
       "作成者だけがTier表を削除できます",
     );
   }
-  await firestore.recursiveDelete(reference);
+  if (snapshot.exists) {
+    await reference.set({deleting: true}, {merge: true});
+    await deleteSharedImagesForTopic(firestore, getStorage(), topicId);
+    await firestore.recursiveDelete(reference);
+  }
+  // Firestoreの削除が本体。以降のStorage残存ファイル掃除に失敗しても、既に
+  // 削除は完了しているため呼び出し元にはエラーを返さない(ログにのみ残す)。
+  try {
+    await getStorage().bucket().deleteFiles({
+      prefix: `users/${request.auth.uid}/topics/${topicId}/`,
+    });
+  } catch (error) {
+    console.error("deleteTierTopic: failed to clean up storage files", error);
+  }
   return {ok: true};
 });
 
-export const reportContent = onCall(async (request) => {
+export const deleteUserAccount = onCall(callableOptions, async (request) => {
+  if (!request.auth) {
+    throw new HttpsError("unauthenticated", "ログインが必要です");
+  }
+  if (isAnonymousRequest(request.auth.token)) {
+    throw new HttpsError(
+      "failed-precondition",
+      "登録済みアカウントのみ削除できます",
+    );
+  }
+  const authTime = Number(request.auth.token.auth_time ?? 0) * 1000;
+  if (!authTime || Date.now() - authTime > 10 * 60 * 1000) {
+    throw new HttpsError(
+      "failed-precondition",
+      "アカウントを削除する前に再認証してください",
+      {reason: "recentLoginRequired"},
+    );
+  }
+
+  const uid = request.auth.uid;
+  await deleteAccountData(getFirestore(), getStorage(), uid);
+  // Authentication is intentionally removed last. If data cleanup fails, the
+  // user can retry instead of being left with inaccessible orphaned data.
+  await getAuth().deleteUser(uid);
+  return {ok: true};
+});
+
+export const reportContent = onCall(callableOptions, async (request) => {
   if (!request.auth) {
     throw new HttpsError("unauthenticated", "ログインが必要です");
   }
@@ -507,12 +666,52 @@ export const reportContent = onCall(async (request) => {
   return {ok: true};
 });
 
+const CONTACT_CATEGORIES = [
+  "general",
+  "rightsInfringement",
+  "deletionRequest",
+  "other",
+] as const;
+
+// 利用規約・プライバシーポリシー記載の問い合わせ/削除依頼窓口。メール送信
+// 基盤は持たないため、Firestoreに保存して運営がコンソールから確認する。
+export const submitContactRequest = onCall(callableOptions, async (request) => {
+  const data = request.data ?? {};
+  const category = CONTACT_CATEGORIES.includes(data.category) ?
+    data.category as string : "general";
+  const message = typeof data.message === "string" ? data.message.trim() : "";
+  const contactEmail = typeof data.contactEmail === "string" ?
+    data.contactEmail.trim() : "";
+  const relatedUrl = typeof data.relatedUrl === "string" ?
+    data.relatedUrl.trim() : "";
+  if (message.length === 0 || message.length > 4000) {
+    throw new HttpsError("invalid-argument", "内容を入力してください(4000文字以内)");
+  }
+  if (contactEmail.length > 200 || relatedUrl.length > 500) {
+    throw new HttpsError("invalid-argument", "入力内容が長すぎます");
+  }
+
+  await getFirestore().collection("contactRequests").add({
+    category,
+    message,
+    contactEmail,
+    relatedUrl,
+    uid: request.auth?.uid ?? null,
+    anonymous: request.auth ? isAnonymousRequest(request.auth.token) : true,
+    createdAt: FieldValue.serverTimestamp(),
+  });
+
+  return {ok: true};
+});
+
 export const onReportWritten = onDocumentWritten(
   "topics/{topicId}/reports/{reportId}",
   async (event) => {
     const topicId = event.params.topicId;
     const firestore = getFirestore();
     const topic = firestore.collection("topics").doc(topicId);
+    const topicSnapshot = await topic.get();
+    if (!topicSnapshot.exists || topicSnapshot.data()?.deleting === true) return;
     const snapshot = await topic.collection("reports").count().get();
     const reportCount = snapshot.data().count;
 
@@ -524,10 +723,13 @@ export const onReportWritten = onDocumentWritten(
       update.moderationStatus = "blocked";
     }
     await topic.set(update, {merge: true});
+    if (reportCount >= REPORT_BLOCK_THRESHOLD) {
+      await hideSharedImagesForTopic(topicId, true);
+    }
   },
 );
 
-export const setModerationStatus = onCall(async (request) => {
+export const setModerationStatus = onCall(callableOptions, async (request) => {
   const firestore = getFirestore();
   await assertAdmin(firestore, request);
 
@@ -545,23 +747,90 @@ export const setModerationStatus = onCall(async (request) => {
     moderationStatus: status,
     updatedAt: FieldValue.serverTimestamp(),
   }, {merge: true});
+  await hideSharedImagesForTopic(topicId, status === "blocked");
 
   return {ok: true};
 });
 
-export const getNgWordConfig = onCall(async (request) => {
+// 管理画面: 共有画像キャッシュ(sharedItemImages)を名前の前方一致で検索する。
+// クエリが空の場合は新着順で一覧表示する。
+export const adminSearchSharedImages = onCall(callableOptions, async (request) => {
+  const firestore = getFirestore();
+  await assertAdmin(firestore, request);
+
+  const rawQuery = typeof request.data?.query === "string" ?
+    request.data.query.trim() : "";
+  let query: FirebaseFirestore.Query = firestore.collection(SHARED_IMAGE_COLLECTION);
+  if (rawQuery.length > 0) {
+    const normalized = normalizeImageName(rawQuery);
+    query = query
+      .orderBy("normalizedName")
+      .startAt(normalized)
+      .endAt(normalized + "");
+  } else {
+    query = query.orderBy("createdAt", "desc");
+  }
+  const snapshot = await query.limit(50).get();
+  return {
+    results: snapshot.docs.map((doc) => ({
+      id: doc.id,
+      ...doc.data(),
+      createdAt: undefined,
+      updatedAt: undefined,
+    })),
+  };
+});
+
+// 管理画面: 共有画像キャッシュを検索対象から非表示/再表示する(物理削除しない)。
+export const adminSetSharedImageHidden = onCall(callableOptions, async (request) => {
+  const firestore = getFirestore();
+  await assertAdmin(firestore, request);
+
+  const key = request.data?.key;
+  const hidden = request.data?.hidden;
+  if (typeof key !== "string" || key.length === 0 || typeof hidden !== "boolean") {
+    throw new HttpsError("invalid-argument", "パラメータが不正です");
+  }
+  await firestore.collection(SHARED_IMAGE_COLLECTION).doc(key).set({
+    hidden,
+    hiddenReason: hidden ? "adminHidden" : FieldValue.delete(),
+    updatedAt: FieldValue.serverTimestamp(),
+  }, {merge: true});
+  return {ok: true};
+});
+
+// 管理画面: 共有画像キャッシュをStorage/Firestoreから完全に削除する。
+export const adminDeleteSharedImage = onCall(callableOptions, async (request) => {
+  const firestore = getFirestore();
+  await assertAdmin(firestore, request);
+
+  const key = request.data?.key;
+  if (typeof key !== "string" || key.length === 0) {
+    throw new HttpsError("invalid-argument", "keyが必要です");
+  }
+  const reference = firestore.collection(SHARED_IMAGE_COLLECTION).doc(key);
+  const snapshot = await reference.get();
+  const storagePath = snapshot.data()?.storagePath;
+  if (typeof storagePath === "string" && storagePath.length > 0) {
+    await getStorage().bucket().file(storagePath).delete({ignoreNotFound: true});
+  }
+  await reference.delete();
+  return {ok: true};
+});
+
+export const getNgWordConfig = onCall(callableOptions, async (request) => {
   const firestore = getFirestore();
   await assertAdmin(firestore, request);
   return loadNgWordConfig(firestore);
 });
 
-export const updateNgWordConfig = onCall(async (request) => {
+export const updateNgWordConfig = onCall(callableOptions, async (request) => {
   const firestore = getFirestore();
   await assertAdmin(firestore, request);
   return updateNgWordConfigForAdmin(firestore, request.data ?? {});
 });
 
-export const getDailyCreateStatus = onCall(async (request) => {
+export const getDailyCreateStatus = onCall(callableOptions, async (request) => {
   if (!request.auth) {
     throw new HttpsError("unauthenticated", "ログインが必要です");
   }
@@ -572,7 +841,7 @@ export const getDailyCreateStatus = onCall(async (request) => {
   );
 });
 
-export const requestCreateAdBonusToken = onCall(async (request) => {
+export const requestCreateAdBonusToken = onCall(callableOptions, async (request) => {
   if (!request.auth) {
     throw new HttpsError("unauthenticated", "ログインが必要です");
   }
@@ -586,7 +855,7 @@ export const requestCreateAdBonusToken = onCall(async (request) => {
   return {token};
 });
 
-export const confirmCreateAdBonus = onCall(async (request) => {
+export const confirmCreateAdBonus = onCall(callableOptions, async (request) => {
   if (!request.auth) {
     throw new HttpsError("unauthenticated", "ログインが必要です");
   }

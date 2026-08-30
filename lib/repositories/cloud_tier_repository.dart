@@ -3,6 +3,7 @@ import '../models/tier_models.dart';
 abstract interface class CloudTierRepository {
   String get currentUserId;
   Future<List<TierTopic>> loadTopics();
+  Future<TierTopic?> loadTopic(String topicId);
   Future<TierTopic> saveTopic(TierTopic topic);
   Future<void> setTopicPublic(String topicId, {required bool isPublic});
   Future<void> deleteTopic(String topicId);
