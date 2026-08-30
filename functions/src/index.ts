@@ -28,6 +28,18 @@ function isAnonymousRequest(authToken: {firebase?: {sign_in_provider?: string}})
   return authToken.firebase?.sign_in_provider === "anonymous";
 }
 
+// メール/パスワード登録ユーザーのみメール確認を必須にする。匿名・Google
+// (既にGoogle側で確認済み)ユーザーは対象外。
+function requiresUnverifiedEmailBlock(authToken: {
+  firebase?: {sign_in_provider?: string};
+  email_verified?: boolean;
+}): boolean {
+  return (
+    authToken.firebase?.sign_in_provider === "password" &&
+    authToken.email_verified !== true
+  );
+}
+
 const REPORT_BLOCK_THRESHOLD = 5;
 
 type ImageSearchResult = {
@@ -186,6 +198,12 @@ type PublishItem = {
 export const publishTierTopic = onCall(async (request) => {
   if (!request.auth) {
     throw new HttpsError("unauthenticated", "ログインが必要です");
+  }
+  if (requiresUnverifiedEmailBlock(request.auth.token)) {
+    throw new HttpsError(
+      "permission-denied",
+      "メールアドレスの確認が完了していません",
+    );
   }
   const uid = request.auth.uid;
   const anonymous = isAnonymousRequest(request.auth.token);
@@ -347,6 +365,12 @@ export const deleteTierTopic = onCall(async (request) => {
 export const reportContent = onCall(async (request) => {
   if (!request.auth) {
     throw new HttpsError("unauthenticated", "ログインが必要です");
+  }
+  if (requiresUnverifiedEmailBlock(request.auth.token)) {
+    throw new HttpsError(
+      "permission-denied",
+      "メールアドレスの確認が完了していません",
+    );
   }
   const data = request.data ?? {};
   const topicId = data.topicId;

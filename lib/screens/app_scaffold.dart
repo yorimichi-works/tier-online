@@ -253,11 +253,7 @@ class _DesktopPortal extends StatelessWidget {
                   ),
                   const SizedBox(width: 4),
                   IconButton(
-                    onPressed: () => ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text(context.l10n.t('anonymousMessage')),
-                      ),
-                    ),
+                    onPressed: () => onSelected(4),
                     icon: const Icon(Icons.account_circle_outlined),
                     tooltip: context.l10n.t('account'),
                   ),

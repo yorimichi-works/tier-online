@@ -15,7 +15,11 @@ const routes: RouteDef[] = [
   { name: 'create', path: '/ja/create' },
   { name: 'mytier', path: '/ja/user' },
   { name: 'settings', path: '/ja/settings' },
-  { name: 'tier-detail', path: '/ja/tier/yokai', scrollAndReshot: true },
+  {
+    name: 'tier-detail',
+    path: '/ja/tier/starter-pasta',
+    scrollAndReshot: true,
+  },
   { name: 'home-ko', path: '/ko/' },
   { name: 'home-en', path: '/en/' },
 ];
@@ -77,8 +81,7 @@ for (const route of routes) {
     // 誤って「読み込み中」のまま撮影してしまうことがある)。
     await page
       .locator('#app-loading[hidden]')
-      .waitFor({ state: 'attached', timeout: 45_000 })
-      .catch(() => {});
+      .waitFor({ state: 'attached', timeout: 45_000 });
     await page.waitForTimeout(1500);
 
     const category = categoryForProject(testInfo.project.name);
@@ -86,21 +89,33 @@ for (const route of routes) {
       process.env.SCREENSHOT_DIR ?? '../artifacts/screenshots';
     const dir = `${screenshotRoot}/${category}`;
     mkdirSync(dir, { recursive: true });
-    await page.screenshot({
+    const initialScreenshot = await page.screenshot({
       path: `${dir}/${route.name}-${category}.png`,
       fullPage: true,
     });
 
     if (route.scrollAndReshot) {
+      await page.mouse.move(
+        testInfo.project.use.viewport?.width
+          ? testInfo.project.use.viewport.width / 2
+          : 400,
+        testInfo.project.use.viewport?.height
+          ? testInfo.project.use.viewport.height / 2
+          : 400,
+      );
       for (let i = 0; i < 10; i++) {
         await page.mouse.wheel(0, 500);
         await page.waitForTimeout(150);
       }
       await page.waitForTimeout(500);
-      await page.screenshot({
+      const scrolledScreenshot = await page.screenshot({
         path: `${dir}/${route.name}-scrolled-${category}.png`,
         fullPage: true,
       });
+      expect(
+        scrolledScreenshot.equals(initialScreenshot),
+        `${route.path} did not move after mouse-wheel scrolling`,
+      ).toBeFalsy();
     }
 
     const meaningfulConsoleErrors = consoleErrors.filter(

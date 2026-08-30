@@ -90,13 +90,13 @@ class AppState extends ChangeNotifier {
        _initialPath = initialPath,
        _deviceLocale = deviceLocale {
     if (_auth != null) {
-      _authSubscription = _auth.userChanges().listen((_) => notifyListeners());
+      _authSubscription = _auth!.userChanges().listen((_) => notifyListeners());
     }
   }
   final TierRepository _repository;
   final LocalTierStore _localStore;
-  final CloudTierRepository? _cloudRepository;
-  final FirebaseAuth? _auth;
+  CloudTierRepository? _cloudRepository;
+  FirebaseAuth? _auth;
   StreamSubscription<User?>? _authSubscription;
   final TierAggregationService _aggregationService;
   final String _initialPath;
@@ -123,6 +123,14 @@ class AppState extends ChangeNotifier {
   bool get authEnabled => _auth != null;
   bool get isAnonymous => _auth?.currentUser?.isAnonymous ?? true;
   String? get userEmail => _auth?.currentUser?.email;
+
+  /// メール確認が必要なのに未確認のアカウントか(匿名・Google確認済みは対象外)。
+  bool get needsEmailVerification {
+    final user = _auth?.currentUser;
+    if (user == null || user.isAnonymous) return false;
+    return !user.emailVerified;
+  }
+
   ThemeMode get themeMode => _themeMode;
   bool get animationsEnabled => _animationsEnabled;
   AppLocale get locale => _locale;
@@ -166,7 +174,7 @@ class AppState extends ChangeNotifier {
     }
     if (_cloudRepository == null) return null;
     try {
-      final submissions = await _cloudRepository.loadSubmissions(topicId);
+      final submissions = await _cloudRepository!.loadSubmissions(topicId);
       for (final submission in submissions) {
         if (submission.userId == userId) return submission;
       }
@@ -206,7 +214,7 @@ class AppState extends ChangeNotifier {
     _region = preferences.getString('region') ?? _locale.defaultRegion;
     if (_cloudRepository != null && pathLocale == null) {
       try {
-        final remote = await _cloudRepository.loadUserPreferences();
+        final remote = await _cloudRepository!.loadUserPreferences();
         if (remote != null) {
           _locale = AppLocaleParser.fromCode(remote.preferredLocale) ?? _locale;
           _region = remote.region;
@@ -251,7 +259,7 @@ class AppState extends ChangeNotifier {
     }
     if (_cloudRepository != null) {
       try {
-        for (final topic in await _cloudRepository.loadTopics()) {
+        for (final topic in await _cloudRepository!.loadTopics()) {
           _cloudTopicIds.add(topic.id);
           _repository.add(topic);
           await _localStore.saveTopic(topic);
@@ -260,7 +268,7 @@ class AppState extends ChangeNotifier {
         _cloudError = error;
       }
       try {
-        await _cloudRepository.saveUserPreferences(
+        await _cloudRepository!.saveUserPreferences(
           preferredLocale: _locale.code,
           region: _region,
         );
@@ -269,6 +277,49 @@ class AppState extends ChangeNotifier {
       }
     }
     _initialized = true;
+    notifyListeners();
+  }
+
+  /// Connects the already-rendered local app to Firebase without delaying the
+  /// first usable frame. Remote topics then replace matching starter IDs and
+  /// are cached using the same rules as a normal cloud-backed startup.
+  Future<void> attachCloud({
+    required CloudTierRepository cloudRepository,
+    required FirebaseAuth auth,
+  }) async {
+    if (identical(_cloudRepository, cloudRepository) &&
+        identical(_auth, auth)) {
+      return;
+    }
+    await _authSubscription?.cancel();
+    _cloudRepository = cloudRepository;
+    _auth = auth;
+    _authSubscription = auth.userChanges().listen((_) => notifyListeners());
+
+    try {
+      final preferences = await SharedPreferences.getInstance();
+      if (AppLocaleParser.fromPath(_initialPath) == null) {
+        final remote = await cloudRepository.loadUserPreferences();
+        if (remote != null) {
+          _locale = AppLocaleParser.fromCode(remote.preferredLocale) ?? _locale;
+          _region = remote.region;
+          await preferences.setString('preferredLocale', _locale.code);
+          await preferences.setString('region', _region);
+        }
+      }
+      for (final topic in await cloudRepository.loadTopics()) {
+        _cloudTopicIds.add(topic.id);
+        _repository.add(topic);
+        await _localStore.saveTopic(topic);
+      }
+      await cloudRepository.saveUserPreferences(
+        preferredLocale: _locale.code,
+        region: _region,
+      );
+      _cloudError = null;
+    } on Object catch (error) {
+      _cloudError = error;
+    }
     notifyListeners();
   }
 
@@ -309,7 +360,7 @@ class AppState extends ChangeNotifier {
   Future<void> _syncUserPreferences() async {
     if (_cloudRepository == null) return;
     try {
-      await _cloudRepository.saveUserPreferences(
+      await _cloudRepository!.saveUserPreferences(
         preferredLocale: _locale.code,
         region: _region,
       );
@@ -326,7 +377,7 @@ class AppState extends ChangeNotifier {
       const {'あなた', '나', 'You'}.contains(topic.creatorName) ||
       topic.id.startsWith('local-') ||
       (_cloudRepository != null &&
-          topic.creatorId == _cloudRepository.currentUserId);
+          topic.creatorId == _cloudRepository!.currentUserId);
 
   Future<void> toggleTopicLike(String topicId) async {
     final topic = _repository.getById(topicId);
@@ -351,7 +402,7 @@ class AppState extends ChangeNotifier {
     await _localStore.saveTopic(updated);
     if (_cloudRepository == null || !_cloudTopicIds.contains(topicId)) return;
     try {
-      await _cloudRepository.setTopicLike(topicId, liked: liked);
+      await _cloudRepository!.setTopicLike(topicId, liked: liked);
     } on Object catch (error) {
       _cloudError = error;
       if (wasLiked) {
@@ -392,7 +443,7 @@ class AppState extends ChangeNotifier {
     _localTalks[topicId] = List.of(await _localStore.loadTalks(topicId));
     if (_cloudRepository != null && _cloudTopicIds.contains(topicId)) {
       try {
-        final cloudTalks = await _cloudRepository.loadTalks(topicId);
+        final cloudTalks = await _cloudRepository!.loadTalks(topicId);
         final byId = <String, TalkPost>{
           for (final post in cloudTalks)
             if (post.id != null) post.id!: post,
@@ -435,8 +486,8 @@ class AppState extends ChangeNotifier {
       var submissions = [submission];
       if (_cloudRepository != null && _cloudTopicIds.contains(topicId)) {
         try {
-          await _cloudRepository.saveSubmission(submission);
-          submissions = await _cloudRepository.loadSubmissions(topicId);
+          await _cloudRepository!.saveSubmission(submission);
+          submissions = await _cloudRepository!.loadSubmissions(topicId);
         } on Object catch (error) {
           _cloudError = error;
         }
@@ -462,7 +513,7 @@ class AppState extends ChangeNotifier {
     notifyListeners();
     await _localStore.saveTopic(topic);
     if (_cloudRepository != null) {
-      final uploaded = await _cloudRepository.saveTopic(topic);
+      final uploaded = await _cloudRepository!.saveTopic(topic);
       _cloudTopicIds.add(uploaded.id);
       _repository.add(uploaded);
       await _localStore.saveTopic(uploaded);
@@ -478,7 +529,7 @@ class AppState extends ChangeNotifier {
     await _localStore.saveTopic(updated);
     if (_cloudRepository != null && _cloudTopicIds.contains(topic.id)) {
       try {
-        await _cloudRepository.setTopicPublic(topic.id, isPublic: isPublic);
+        await _cloudRepository!.setTopicPublic(topic.id, isPublic: isPublic);
       } on Object catch (error) {
         _cloudError = error;
         _repository.add(topic);
@@ -491,7 +542,7 @@ class AppState extends ChangeNotifier {
   Future<void> deleteOwnTopic(TierTopic topic) async {
     if (!isOwnTopic(topic)) return;
     if (_cloudRepository != null && _cloudTopicIds.contains(topic.id)) {
-      await _cloudRepository.deleteTopic(topic.id);
+      await _cloudRepository!.deleteTopic(topic.id);
       _cloudTopicIds.remove(topic.id);
     }
     _repository.remove(topic.id);
@@ -688,7 +739,7 @@ class AppState extends ChangeNotifier {
     );
     if (_cloudRepository != null && _cloudTopicIds.contains(topicId)) {
       try {
-        await _cloudRepository.reportTalk(
+        await _cloudRepository!.reportTalk(
           topicId,
           postId: postId,
           replyId: replyId,
@@ -704,7 +755,7 @@ class AppState extends ChangeNotifier {
   Future<void> _syncTalks(String topicId, List<TalkPost> posts) async {
     if (_cloudRepository == null || !_cloudTopicIds.contains(topicId)) return;
     try {
-      await _cloudRepository.saveTalks(topicId, posts);
+      await _cloudRepository!.saveTalks(topicId, posts);
     } on Object catch (error) {
       _cloudError = error;
       notifyListeners();
@@ -725,11 +776,45 @@ class AppState extends ChangeNotifier {
       } else {
         await auth.signInWithEmailAndPassword(email: email, password: password);
       }
+      await _sendVerificationEmail();
       notifyListeners();
       return const AuthResult(AuthResultStatus.success);
     } on FirebaseAuthException catch (error) {
       return AuthResult.fromException(error);
     }
+  }
+
+  /// 現在の言語(ja/ko/en)をFirebase Authへ設定してから確認メールを送る。
+  /// 匿名または既に確認済みの場合は何もしない(送信失敗はアカウント作成の
+  /// 成功自体を損なわないよう、呼び出し元では別途エラー表示のみ行う)。
+  Future<bool> _sendVerificationEmail() async {
+    final user = _auth?.currentUser;
+    if (user == null || user.isAnonymous || user.emailVerified) return true;
+    try {
+      await _auth!.setLanguageCode(switch (_locale) {
+        AppLocale.ja => 'ja',
+        AppLocale.ko => 'ko',
+        AppLocale.en => 'en',
+      });
+      await user.sendEmailVerification();
+      return true;
+    } on Object catch (error) {
+      _cloudError = error;
+      notifyListeners();
+      return false;
+    }
+  }
+
+  /// メール再送。呼び出し元でクールダウン(30〜60秒)を管理すること。
+  Future<bool> resendVerificationEmail() => _sendVerificationEmail();
+
+  /// Firebaseからユーザー情報を再取得し、最新のemailVerified状態を返す。
+  Future<bool> refreshEmailVerified() async {
+    final user = _auth?.currentUser;
+    if (user == null) return false;
+    await user.reload();
+    notifyListeners();
+    return _auth?.currentUser?.emailVerified ?? false;
   }
 
   Future<AuthResult> signInWithEmail(String email, String password) async {
@@ -844,7 +929,7 @@ class AppState extends ChangeNotifier {
     );
     if (_cloudRepository != null) {
       try {
-        final submitted = await _cloudRepository.reportTopic(
+        final submitted = await _cloudRepository!.reportTopic(
           topicId,
           reason: reason,
         );
@@ -875,13 +960,11 @@ class AppState extends ChangeNotifier {
     super.dispose();
   }
 
-  Iterable<TierTopic> get startedTopics => topics.where(
-    (topic) => isOwnTopic(topic) || hasSubmitted(topic.id),
-  );
+  Iterable<TierTopic> get startedTopics =>
+      topics.where((topic) => isOwnTopic(topic) || hasSubmitted(topic.id));
 
   Iterable<TierTopic> get createdTopics => topics.where(isOwnTopic);
 
-  Iterable<TierTopic> get joinedTopics => topics.where(
-    (topic) => !isOwnTopic(topic) && hasSubmitted(topic.id),
-  );
+  Iterable<TierTopic> get joinedTopics =>
+      topics.where((topic) => !isOwnTopic(topic) && hasSubmitted(topic.id));
 }

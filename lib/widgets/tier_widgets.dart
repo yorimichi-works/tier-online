@@ -114,12 +114,7 @@ class TierItemCard extends StatelessWidget {
           fit: StackFit.expand,
           children: [
             if (item.hasImage)
-              Image.network(
-                item.imageUrl!,
-                fit: BoxFit.cover,
-                errorBuilder: (_, _, _) =>
-                    const Center(child: Icon(Icons.broken_image_outlined)),
-              )
+              _TierItemImage(imageUrl: item.imageUrl!)
             else
               Center(
                 child: Padding(
@@ -199,6 +194,34 @@ class TierItemCard extends StatelessWidget {
   }
 }
 
+class _TierItemImage extends StatelessWidget {
+  const _TierItemImage({required this.imageUrl});
+
+  final String imageUrl;
+
+  @override
+  Widget build(BuildContext context) {
+    Widget errorBuilder(
+      BuildContext context,
+      Object error,
+      StackTrace? stackTrace,
+    ) => const Center(child: Icon(Icons.broken_image_outlined));
+
+    if (imageUrl.startsWith('assets/')) {
+      return Image.asset(
+        imageUrl,
+        fit: BoxFit.cover,
+        errorBuilder: errorBuilder,
+      );
+    }
+    return Image.network(
+      imageUrl,
+      fit: BoxFit.cover,
+      errorBuilder: errorBuilder,
+    );
+  }
+}
+
 class TierRowView extends StatelessWidget {
   const TierRowView({
     super.key,
@@ -268,6 +291,71 @@ class TierRowView extends StatelessWidget {
   );
 }
 
+/// Card display density. Persist the user's choice with a toggle at the
+/// list level (see `TopicViewModeToggle`) so it is consistent across a
+/// screen's grid.
+enum TopicCardDensity { full, compact }
+
+class TopicViewModeToggle extends StatelessWidget {
+  const TopicViewModeToggle({
+    super.key,
+    required this.density,
+    required this.onChanged,
+  });
+  final TopicCardDensity density;
+  final ValueChanged<TopicCardDensity> onChanged;
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    Widget button(TopicCardDensity value, IconData icon, String label) {
+      final selected = density == value;
+      return Tooltip(
+        message: label,
+        child: InkWell(
+          onTap: () => onChanged(value),
+          borderRadius: BorderRadius.circular(10),
+          child: Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: selected ? scheme.primary : Colors.transparent,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(
+              icon,
+              size: 18,
+              color: selected ? Colors.white : scheme.onSurfaceVariant,
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(3),
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerHigh,
+        borderRadius: BorderRadius.circular(13),
+        border: Border.all(color: scheme.outlineVariant),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          button(
+            TopicCardDensity.full,
+            Icons.grid_view_rounded,
+            context.l10n.t('viewModeFull'),
+          ),
+          button(
+            TopicCardDensity.compact,
+            Icons.view_list_rounded,
+            context.l10n.t('viewModeCompact'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class TopicCard extends StatelessWidget {
   const TopicCard({
     super.key,
@@ -278,6 +366,7 @@ class TopicCard extends StatelessWidget {
     this.onLike,
     this.managementAction,
     this.showJoinAction = true,
+    this.density = TopicCardDensity.full,
   });
   final TierTopic topic;
   final VoidCallback onTap;
@@ -286,103 +375,224 @@ class TopicCard extends StatelessWidget {
   final VoidCallback? onLike;
   final Widget? managementAction;
   final bool showJoinAction;
+  final TopicCardDensity density;
+
+  @override
+  Widget build(BuildContext context) => Card(
+    clipBehavior: Clip.antiAlias,
+    child: InkWell(
+      onTap: onTap,
+      child: density == TopicCardDensity.compact
+          ? _CompactTopicCardBody(topic: topic, liked: liked)
+          : _FullTopicCardBody(
+              topic: topic,
+              progress: progress,
+              liked: liked,
+              onLike: onLike,
+              managementAction: managementAction,
+              showJoinAction: showJoinAction,
+              onTap: onTap,
+            ),
+    ),
+  );
+}
+
+class _TrendingBadge extends StatelessWidget {
+  const _TrendingBadge();
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+    decoration: BoxDecoration(
+      color: const Color(0xFFFF575E),
+      borderRadius: BorderRadius.circular(99),
+    ),
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const Icon(Icons.local_fire_department_rounded, size: 13, color: Colors.white),
+        const SizedBox(width: 3),
+        Text(
+          context.l10n.t('trending'),
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 11,
+            fontWeight: FontWeight.w900,
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+class _LikeCountBadge extends StatelessWidget {
+  const _LikeCountBadge({required this.count, required this.liked});
+  final int count;
+  final bool liked;
+  @override
+  Widget build(BuildContext context) => Row(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      Icon(
+        liked ? Icons.favorite_rounded : Icons.favorite_border_rounded,
+        size: 17,
+        color: const Color(0xFFFF7186),
+      ),
+      const SizedBox(width: 5),
+      Text(
+        '$count',
+        style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800),
+      ),
+    ],
+  );
+}
+
+class _WinnerRow extends StatelessWidget {
+  const _WinnerRow({required this.topic});
+  final TierTopic topic;
+  @override
+  Widget build(BuildContext context) => Row(
+    children: [
+      const Text('👑', style: TextStyle(fontSize: 15)),
+      const SizedBox(width: 6),
+      Text(
+        context.l10n.format('firstPlace', {
+          'rank': topic.faceRank?.label ?? context.l10n.t('notAggregated'),
+        }),
+        style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w900),
+      ),
+      if (topic.faceItem?.hasName ?? false) ...[
+        const SizedBox(width: 6),
+        Expanded(
+          child: Text(
+            topic.faceItem!.name!,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w900),
+          ),
+        ),
+      ],
+    ],
+  );
+}
+
+class _TagWrap extends StatelessWidget {
+  const _TagWrap({required this.tags, this.max = 3});
+  final List<String> tags;
+  final int max;
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Wrap(
+      spacing: 6,
+      runSpacing: 6,
+      children: [
+        for (final tag in tags.take(max))
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+            decoration: BoxDecoration(
+              color: scheme.primary.withValues(alpha: .14),
+              borderRadius: BorderRadius.circular(99),
+            ),
+            child: Text(
+              '#$tag',
+              style: TextStyle(
+                color: scheme.primary,
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+class _FullTopicCardBody extends StatelessWidget {
+  const _FullTopicCardBody({
+    required this.topic,
+    required this.progress,
+    required this.liked,
+    required this.onLike,
+    required this.managementAction,
+    required this.showJoinAction,
+    required this.onTap,
+  });
+  final TierTopic topic;
+  final double? progress;
+  final bool liked;
+  final VoidCallback? onLike;
+  final Widget? managementAction;
+  final bool showJoinAction;
+  final VoidCallback onTap;
+
   @override
   Widget build(BuildContext context) {
     final face = topic.faceItem;
-    return Card(
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: onTap,
-        child: Padding(
+    final hasBanner = face?.hasImage ?? false;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (hasBanner)
+          AspectRatio(
+            aspectRatio: 16 / 9,
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                _TierItemImage(imageUrl: face!.imageUrl!),
+                if (topic.isTrending)
+                  const Positioned(top: 10, right: 10, child: _TrendingBadge()),
+              ],
+            ),
+          ),
+        Padding(
           padding: const EdgeInsets.all(16),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              if (!hasBanner)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: Row(
+                    children: [
+                      if (topic.isTrending) const _TrendingBadge(),
+                      const Spacer(),
+                      GestureDetector(
+                        onTap: onLike,
+                        child: _LikeCountBadge(
+                          count: topic.likeCount,
+                          liked: liked,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  if (face != null) TierItemCard(item: face, size: 82),
-                  const Spacer(),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: [
-                      OutlinedButton.icon(
-                        onPressed: onLike,
-                        icon: Icon(
-                          liked
-                              ? Icons.favorite_rounded
-                              : Icons.favorite_border_rounded,
-                          color: liked ? const Color(0xFFFF7186) : null,
-                          size: 18,
-                        ),
-                        label: Text('${topic.likeCount}'),
-                        style: OutlinedButton.styleFrom(
-                          backgroundColor: Theme.of(
-                            context,
-                          ).colorScheme.surfaceContainerHigh,
-                          foregroundColor: Theme.of(
-                            context,
-                          ).colorScheme.onSurface,
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 11,
-                            vertical: 7,
-                          ),
-                          minimumSize: const Size(0, 36),
-                          textStyle: const TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w900,
-                          ),
-                        ),
+                  Expanded(
+                    child: Text(
+                      topic.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 19,
+                        fontWeight: FontWeight.w900,
                       ),
-                      const SizedBox(height: 8),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 4,
-                        ),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFFF575E),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Text(
-                          context.l10n.format('firstPlace', {
-                            'rank':
-                                topic.faceRank?.label ??
-                                context.l10n.t('notAggregated'),
-                          }),
-                          style: const TextStyle(
-                            color: Colors.black,
-                            fontSize: 10,
-                            fontWeight: FontWeight.w900,
-                          ),
-                        ),
-                      ),
-                      if (topic.isTrending) ...[
-                        const SizedBox(height: 8),
-                        Text(
-                          context.l10n.t('trending'),
-                          style: const TextStyle(
-                            color: Color(0xFFFF7186),
-                            fontSize: 11,
-                            fontWeight: FontWeight.w900,
-                          ),
-                        ),
-                      ],
-                    ],
+                    ),
                   ),
+                  if (hasBanner) ...[
+                    const SizedBox(width: 8),
+                    GestureDetector(
+                      onTap: onLike,
+                      child: _LikeCountBadge(
+                        count: topic.likeCount,
+                        liked: liked,
+                      ),
+                    ),
+                  ],
                 ],
               ),
-              const SizedBox(height: 15),
-              Text(
-                topic.title,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w900,
-                ),
-              ),
-              const SizedBox(height: 7),
+              const SizedBox(height: 6),
               Text(
                 context.l10n.topicDescription(topic.description),
                 maxLines: 2,
@@ -390,27 +600,19 @@ class TopicCard extends StatelessWidget {
                 style: TextStyle(
                   color: Theme.of(context).colorScheme.onSurfaceVariant,
                   height: 1.4,
-                  fontSize: 12,
+                  fontSize: 12.5,
                 ),
               ),
-              const SizedBox(height: 11),
-              Wrap(
-                spacing: 5,
-                children: [
-                  for (final tag in topic.tags.take(3))
-                    Text(
-                      '#$tag',
-                      style: TextStyle(
-                        color: Theme.of(context).colorScheme.secondary,
-                        fontSize: 11,
-                      ),
-                    ),
-                ],
-              ),
               const SizedBox(height: 13),
+              _WinnerRow(topic: topic),
+              const SizedBox(height: 11),
               Row(
                 children: [
-                  const Icon(Icons.people_outline_rounded, size: 15),
+                  Icon(
+                    Icons.people_outline_rounded,
+                    size: 15,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
                   const SizedBox(width: 4),
                   Expanded(
                     child: Text(
@@ -420,11 +622,18 @@ class TopicCard extends StatelessWidget {
                       }),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontSize: 11),
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
                     ),
                   ),
                 ],
               ),
+              if (topic.tags.isNotEmpty) ...[
+                const SizedBox(height: 11),
+                _TagWrap(tags: topic.tags),
+              ],
               if (progress != null) ...[
                 const SizedBox(height: 11),
                 LinearProgressIndicator(
@@ -441,7 +650,7 @@ class TopicCard extends StatelessWidget {
                 SizedBox(width: double.infinity, child: managementAction!),
               ],
               if (showJoinAction) ...[
-                const SizedBox(height: 13),
+                const SizedBox(height: 14),
                 SizedBox(
                   width: double.infinity,
                   child: FilledButton.icon(
@@ -452,6 +661,9 @@ class TopicCard extends StatelessWidget {
                       minimumSize: const Size.fromHeight(46),
                       backgroundColor: AppColors.purple,
                       foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
                       textStyle: const TextStyle(
                         fontSize: 14,
                         fontWeight: FontWeight.w900,
@@ -463,6 +675,108 @@ class TopicCard extends StatelessWidget {
             ],
           ),
         ),
+      ],
+    );
+  }
+}
+
+class _CompactTopicCardBody extends StatelessWidget {
+  const _CompactTopicCardBody({required this.topic, required this.liked});
+  final TierTopic topic;
+  final bool liked;
+
+  @override
+  Widget build(BuildContext context) {
+    final face = topic.faceItem;
+    final hasThumb = face?.hasImage ?? false;
+    return Padding(
+      padding: const EdgeInsets.all(12),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          if (hasThumb) ...[
+            ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: SizedBox(
+                width: 64,
+                height: 64,
+                child: _TierItemImage(imageUrl: face!.imageUrl!),
+              ),
+            ),
+            const SizedBox(width: 13),
+          ],
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        topic.title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    _LikeCountBadge(count: topic.likeCount, liked: liked),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                Row(
+                  children: [
+                    Flexible(
+                      child: Text(
+                        context.l10n.format('firstPlace', {
+                          'rank':
+                              topic.faceRank?.label ??
+                              context.l10n.t('notAggregated'),
+                        }),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Icon(
+                      Icons.people_outline_rounded,
+                      size: 13,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                    const SizedBox(width: 3),
+                    Text(
+                      '${topic.participants}',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+                if (topic.tags.isNotEmpty) ...[
+                  const SizedBox(height: 7),
+                  _TagWrap(tags: topic.tags, max: 3),
+                ],
+              ],
+            ),
+          ),
+          if (topic.isTrending) ...[
+            const SizedBox(width: 10),
+            const _TrendingBadge(),
+          ],
+          const SizedBox(width: 4),
+          Icon(
+            Icons.chevron_right_rounded,
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
+          ),
+        ],
       ),
     );
   }

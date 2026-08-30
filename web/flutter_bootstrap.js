@@ -1,6 +1,19 @@
 {{flutter_js}}
 {{flutter_build_config}}
 
+function withStartupTimeout(promise, timeoutMs, label) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = window.setTimeout(
+      () => reject(new Error(`${label} timed out after ${timeoutMs}ms`)),
+      timeoutMs,
+    );
+  });
+  return Promise.race([promise, timeout]).finally(() => {
+    window.clearTimeout(timer);
+  });
+}
+
 async function waitForTierFonts() {
   if (!document.fonts || typeof document.fonts.load !== 'function') {
     return;
@@ -37,15 +50,30 @@ async function clearLegacyFlutterWorker() {
 }
 
 (async () => {
-  try {
-    await clearLegacyFlutterWorker();
-    await waitForTierFonts();
+  let fontsReady = false;
+  const startupResults = await Promise.allSettled([
+    withStartupTimeout(clearLegacyFlutterWorker(), 1500, 'Cache cleanup'),
+    withStartupTimeout(waitForTierFonts(), 2500, 'Tier font preload').then(() => {
+      fontsReady = true;
+    }),
+  ]);
+  if (fontsReady) {
     document.documentElement.dataset.tierFontsReady = 'true';
-  } catch (error) {
-    // A local font failure must not leave the app permanently blocked. The
-    // ThemeData OS font stack remains available as the final fallback.
-    console.warn('Tier fonts could not be preloaded; using system fallback.', error);
+  }
+  for (const result of startupResults) {
+    if (result.status === 'rejected') {
+      // Startup helpers are best-effort. Flutter must always be allowed to
+      // render with its bundled or OS fallback fonts.
+      console.warn('Tier startup helper was skipped.', result.reason);
+    }
   }
 
-  await _flutter.loader.load();
+  await _flutter.loader.load({
+    config: {
+      // The release build already ships CanvasKit under /canvaskit. Keeping
+      // the engine local prevents ad blockers or restricted networks from
+      // making the entire Flutter app fail before its first frame.
+      canvasKitBaseUrl: 'canvaskit/',
+    },
+  });
 })();

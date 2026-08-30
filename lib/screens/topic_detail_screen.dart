@@ -197,136 +197,142 @@ class _TopicDetailScreenState extends State<TopicDetailScreen> {
         ),
       ],
     ),
-    body: MiddleMouseAutoScroll(
+    body: Scrollbar(
       controller: _scrollController,
-      child: AnimatedBuilder(
-        animation: widget.appState,
-        builder: (context, _) {
-          final currentTopic = widget.appState.topics.firstWhere(
-            (topic) => topic.id == widget.topic.id,
-            orElse: () => widget.topic,
-          );
-          final placements = widget.appState.placementsFor(widget.topic.id);
-          final placed = placements.values.fold(
-            0,
-            (total, items) => total + items.length,
-          );
-          if (widget.initialTab == 1) {
+      thumbVisibility: MediaQuery.sizeOf(context).width >= 900,
+      trackVisibility: MediaQuery.sizeOf(context).width >= 900,
+      interactive: true,
+      child: MiddleMouseAutoScroll(
+        controller: _scrollController,
+        child: AnimatedBuilder(
+          animation: widget.appState,
+          builder: (context, _) {
+            final currentTopic = widget.appState.topics.firstWhere(
+              (topic) => topic.id == widget.topic.id,
+              orElse: () => widget.topic,
+            );
+            final placements = widget.appState.placementsFor(widget.topic.id);
+            final placed = placements.values.fold(
+              0,
+              (total, items) => total + items.length,
+            );
+            if (widget.initialTab == 1) {
+              return SingleChildScrollView(
+                controller: _scrollController,
+                child: ContentFrame(maxWidth: 840, child: _talkBoard()),
+              );
+            }
             return SingleChildScrollView(
               controller: _scrollController,
-              child: ContentFrame(maxWidth: 840, child: _talkBoard()),
-            );
-          }
-          return SingleChildScrollView(
-            controller: _scrollController,
-            child: ContentFrame(
-              maxWidth: 840,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      if (currentTopic.faceItem != null)
-                        TierItemCard(item: currentTopic.faceItem!, size: 84),
-                      const SizedBox(width: 16),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              widget.topic.category,
-                              style: const TextStyle(
-                                color: AppColors.purple,
-                                fontSize: 12,
-                                fontWeight: FontWeight.w900,
+              child: ContentFrame(
+                maxWidth: 840,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        if (currentTopic.faceItem != null)
+                          TierItemCard(item: currentTopic.faceItem!, size: 84),
+                        const SizedBox(width: 16),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                widget.topic.category,
+                                style: const TextStyle(
+                                  color: AppColors.purple,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w900,
+                                ),
                               ),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              widget.topic.title,
-                              style: Theme.of(context).textTheme.headlineSmall
-                                  ?.copyWith(fontWeight: FontWeight.w900),
-                            ),
-                            const SizedBox(height: 7),
-                            Text(
-                              context.l10n.format('participantsItems', {
-                                'participants': widget.topic.participants,
-                                'items': widget.topic.items.length,
-                                'creator': widget.topic.creatorName,
-                              }),
-                              style: TextStyle(
-                                color: Theme.of(
-                                  context,
-                                ).colorScheme.onSurfaceVariant,
-                                fontSize: 12,
+                              const SizedBox(height: 4),
+                              Text(
+                                widget.topic.title,
+                                style: Theme.of(context).textTheme.headlineSmall
+                                    ?.copyWith(fontWeight: FontWeight.w900),
                               ),
-                            ),
-                          ],
+                              const SizedBox(height: 7),
+                              Text(
+                                context.l10n.format('participantsItems', {
+                                  'participants': widget.topic.participants,
+                                  'items': widget.topic.items.length,
+                                  'creator': widget.topic.creatorName,
+                                }),
+                                style: TextStyle(
+                                  color: Theme.of(
+                                    context,
+                                  ).colorScheme.onSurfaceVariant,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-                  Text(
-                    context.l10n.topicDescription(widget.topic.description),
-                    style: const TextStyle(height: 1.6),
-                  ),
-                  const SizedBox(height: 11),
-                  Wrap(
-                    spacing: 7,
-                    runSpacing: 7,
-                    children: [
-                      ActionChip(
-                        avatar: Icon(
-                          widget.appState.isTopicLiked(widget.topic.id)
-                              ? Icons.favorite_rounded
-                              : Icons.favorite_border_rounded,
-                          color: widget.appState.isTopicLiked(widget.topic.id)
-                              ? const Color(0xFFFF7186)
-                              : null,
-                          size: 18,
-                        ),
-                        label: Text(
-                          context.l10n.format('likeCount', {
-                            'count': currentTopic.likeCount,
-                          }),
-                        ),
-                        onPressed: () =>
-                            widget.appState.toggleTopicLike(widget.topic.id),
-                      ),
-                      for (final tag in widget.topic.tags)
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      context.l10n.topicDescription(widget.topic.description),
+                      style: const TextStyle(height: 1.6),
+                    ),
+                    const SizedBox(height: 11),
+                    Wrap(
+                      spacing: 7,
+                      runSpacing: 7,
+                      children: [
                         ActionChip(
-                          label: Text('#$tag'),
-                          onPressed: () {
-                            widget.onTagTap(tag);
-                            Navigator.of(context).pop();
-                          },
+                          avatar: Icon(
+                            widget.appState.isTopicLiked(widget.topic.id)
+                                ? Icons.favorite_rounded
+                                : Icons.favorite_border_rounded,
+                            color: widget.appState.isTopicLiked(widget.topic.id)
+                                ? const Color(0xFFFF7186)
+                                : null,
+                            size: 18,
+                          ),
+                          label: Text(
+                            context.l10n.format('likeCount', {
+                              'count': currentTopic.likeCount,
+                            }),
+                          ),
+                          onPressed: () =>
+                              widget.appState.toggleTopicLike(widget.topic.id),
                         ),
-                    ],
-                  ),
-                  const SizedBox(height: 24),
-                  _CommunityBoard(topic: currentTopic),
-                  const SizedBox(height: 18),
-                  PrimaryButton(
-                    label: placed == 0
-                        ? context.l10n.t('makeMine')
-                        : placed == widget.topic.items.length
-                        ? context.l10n.t('editMyTier')
-                        : context.l10n.format('continueTier', {
-                            'placed': placed,
-                            'total': widget.topic.items.length,
-                          }),
-                    icon: Icons.dashboard_customize_rounded,
-                    onPressed: _buildTier,
-                  ),
-                  const SizedBox(height: 32),
-                  _talkBoard(previewLimit: 3),
-                ],
+                        for (final tag in widget.topic.tags)
+                          ActionChip(
+                            label: Text('#$tag'),
+                            onPressed: () {
+                              widget.onTagTap(tag);
+                              Navigator.of(context).pop();
+                            },
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 24),
+                    _CommunityBoard(topic: currentTopic),
+                    const SizedBox(height: 18),
+                    PrimaryButton(
+                      label: placed == 0
+                          ? context.l10n.t('makeMine')
+                          : placed == widget.topic.items.length
+                          ? context.l10n.t('editMyTier')
+                          : context.l10n.format('continueTier', {
+                              'placed': placed,
+                              'total': widget.topic.items.length,
+                            }),
+                      icon: Icons.dashboard_customize_rounded,
+                      onPressed: _buildTier,
+                    ),
+                    const SizedBox(height: 32),
+                    _talkBoard(previewLimit: 3),
+                  ],
+                ),
               ),
-            ),
-          );
-        },
+            );
+          },
+        ),
       ),
     ),
   );

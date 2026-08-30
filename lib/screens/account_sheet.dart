@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../l10n/app_localizations.dart';
 import '../services/app_state.dart';
+import 'email_verification_pending_screen.dart';
 
 Future<void> showAccountSheet(BuildContext context, AppState appState) {
   return showDialog<void>(
@@ -81,7 +82,16 @@ class _AccountSheetBodyState extends State<_AccountSheetBody> {
     if (!mounted) return;
     setState(() => _submitting = false);
     if (result.isSuccess) {
-      Navigator.of(context).pop();
+      final navigator = Navigator.of(context);
+      navigator.pop();
+      if (widget.appState.needsEmailVerification) {
+        navigator.push(
+          MaterialPageRoute<void>(
+            builder: (_) =>
+                EmailVerificationPendingScreen(appState: widget.appState),
+          ),
+        );
+      }
       return;
     }
     ScaffoldMessenger.of(

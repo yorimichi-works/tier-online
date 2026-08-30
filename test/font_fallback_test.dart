@@ -73,7 +73,9 @@ void main() {
 
     final bootstrap = File('web/flutter_bootstrap.js').readAsStringSync();
     expect(bootstrap, contains('document.fonts.load'));
-    expect(bootstrap, contains('await waitForTierFonts()'));
+    expect(bootstrap, contains('withStartupTimeout(waitForTierFonts()'));
+    expect(bootstrap, contains('Promise.allSettled'));
+    expect(bootstrap, contains("canvasKitBaseUrl: 'canvaskit/'"));
     expect(bootstrap, contains('_flutter.loader.load'));
   });
 }

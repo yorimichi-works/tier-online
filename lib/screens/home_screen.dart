@@ -29,6 +29,7 @@ class _HomeScreenState extends State<HomeScreen> {
   String? _category;
   bool _viewWorldTiers = false;
   final Set<AppLocale> _languages = {};
+  TopicCardDensity _density = TopicCardDensity.full;
   void _open(TierTopic topic) => Navigator.of(context).pushNamed(
     '/${widget.appState.locale.code}/tier/${topic.id}',
     arguments: widget.onExplore,
@@ -203,9 +204,20 @@ class _HomeScreenState extends State<HomeScreen> {
               }),
             ),
             const SizedBox(height: 26),
-            SectionHeader(
-              title: context.l10n.t('findInteresting'),
-              subtitle: context.l10n.count('themeCount', shown.length),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Expanded(
+                  child: SectionHeader(
+                    title: context.l10n.t('findInteresting'),
+                    subtitle: context.l10n.count('themeCount', shown.length),
+                  ),
+                ),
+                TopicViewModeToggle(
+                  density: _density,
+                  onChanged: (value) => setState(() => _density = value),
+                ),
+              ],
             ),
             const SizedBox(height: 12),
             SingleChildScrollView(
@@ -218,9 +230,9 @@ class _HomeScreenState extends State<HomeScreen> {
             const SizedBox(height: 14),
             LayoutBuilder(
               builder: (context, constraints) {
-                final columns = AppBreakpoints.gridColumns(
-                  constraints.maxWidth,
-                );
+                final columns = _density == TopicCardDensity.compact
+                    ? 1
+                    : AppBreakpoints.gridColumns(constraints.maxWidth);
                 const gap = 13.0;
                 final width =
                     (constraints.maxWidth - gap * (columns - 1)) / columns;
@@ -233,6 +245,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         width: width,
                         child: TopicCard(
                           topic: topic,
+                          density: _density,
                           liked: widget.appState.isTopicLiked(topic.id),
                           onLike: () async {
                             await widget.appState.toggleTopicLike(topic.id);

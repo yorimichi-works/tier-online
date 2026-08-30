@@ -156,7 +156,11 @@ class SettingsScreen extends StatelessWidget {
                   subtitle: Text(
                     appState.cloudEnabled
                         ? appState.cloudError == null
-                              ? context.l10n.t('syncedAnonymous')
+                              ? context.l10n.t(
+                                  appState.isAnonymous
+                                      ? 'syncedAnonymous'
+                                      : 'syncedAccount',
+                                )
                               : context.l10n.t('syncRetry')
                         : context.l10n.t('savedLocally'),
                   ),
@@ -176,7 +180,11 @@ class SettingsScreen extends StatelessWidget {
               padding: const EdgeInsets.all(16),
               child: Text(
                 appState.cloudEnabled
-                    ? context.l10n.t('anonymousDescription')
+                    ? context.l10n.t(
+                        appState.isAnonymous
+                            ? 'anonymousDescription'
+                            : 'accountSyncDescription',
+                      )
                     : context.l10n.t('localBuildDescription'),
                 style: TextStyle(
                   color: Theme.of(context).colorScheme.onSurfaceVariant,

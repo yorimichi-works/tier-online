@@ -45,4 +45,14 @@ flutter:
     - assets/branding/tier-logo.png
     - assets/branding/tier-logo-ko.png
     - assets/branding/tier-logo-en.png
+    - assets/starter_tiers/items/pasta/
+    - assets/starter_tiers/items/breakfast/
+    - assets/starter_tiers/items/pizza/
+    - assets/starter_tiers/items/sweets/
+    - assets/starter_tiers/items/ramen/
+    - assets/starter_tiers/items/coffee/
+    - assets/starter_tiers/items/curry/
+    - assets/starter_tiers/items/bread/
+    - assets/starter_tiers/items/fruit/
+    - assets/starter_tiers/items/landscapes/
     - assets/fonts/OFL.txt

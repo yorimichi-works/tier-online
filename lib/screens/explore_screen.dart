@@ -30,6 +30,7 @@ class _ExploreScreenState extends State<ExploreScreen> {
   );
   bool _viewWorldTiers = false;
   final Set<AppLocale> _languages = {};
+  TopicCardDensity _density = TopicCardDensity.full;
   @override
   void didUpdateWidget(covariant ExploreScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
@@ -131,18 +132,29 @@ class _ExploreScreenState extends State<ExploreScreen> {
               }),
             ),
             const SizedBox(height: 22),
-            SectionHeader(
-              title: context.l10n.count('tierCount', topics.length),
-              subtitle: query.isEmpty
-                  ? context.l10n.t('availableTopics')
-                  : context.l10n.queryResult(_query),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Expanded(
+                  child: SectionHeader(
+                    title: context.l10n.count('tierCount', topics.length),
+                    subtitle: query.isEmpty
+                        ? context.l10n.t('availableTopics')
+                        : context.l10n.queryResult(_query),
+                  ),
+                ),
+                TopicViewModeToggle(
+                  density: _density,
+                  onChanged: (value) => setState(() => _density = value),
+                ),
+              ],
             ),
             const SizedBox(height: 13),
             LayoutBuilder(
               builder: (context, constraints) {
-                final columns = AppBreakpoints.gridColumns(
-                  constraints.maxWidth,
-                );
+                final columns = _density == TopicCardDensity.compact
+                    ? 1
+                    : AppBreakpoints.gridColumns(constraints.maxWidth);
                 const gap = 13.0;
                 final width =
                     (constraints.maxWidth - gap * (columns - 1)) / columns;
@@ -159,6 +171,7 @@ class _ExploreScreenState extends State<ExploreScreen> {
                           delayIndex: index,
                           child: TopicCard(
                             topic: topics[index],
+                            density: _density,
                             liked: widget.appState.isTopicLiked(
                               topics[index].id,
                             ),

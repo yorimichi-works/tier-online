@@ -6,6 +6,13 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    // メール/パスワード登録ユーザーのみメール確認を必須にする。匿名・Google
+    // (Google側で確認済み)ユーザーはこのチェックの対象外。
+    function emailVerifiedOrExempt() {
+      return request.auth.token.firebase.sign_in_provider != 'password' ||
+        request.auth.token.email_verified == true;
+    }
+
     function ownsTopic(topicId) {
       return signedIn() &&
         get(/databases/$(database)/documents/topics/$(topicId)).data.creatorId == request.auth.uid;
@@ -84,13 +91,15 @@ service cloud.firestore {
 
       match /talks/{talkId} {
         allow read: if canViewTopic(topicId);
-        allow create, update: if signedIn() && canViewTopic(topicId);
+        allow create, update: if signedIn() && canViewTopic(topicId) &&
+          emailVerifiedOrExempt();
         allow delete: if ownsTopic(topicId);
       }
 
       match /reports/{reportId} {
         allow create: if signedIn() &&
           canViewTopic(topicId) &&
+          emailVerifiedOrExempt() &&
           request.resource.data.reporterUserId == request.auth.uid;
         allow read, update, delete: if false;
       }
@@ -100,6 +109,7 @@ service cloud.firestore {
           canViewTopic(topicId);
         allow create: if signedIn() && request.auth.uid == userId &&
           canViewTopic(topicId) &&
+          emailVerifiedOrExempt() &&
           request.resource.data.userId == request.auth.uid;
         allow delete: if signedIn() && request.auth.uid == userId;
         allow update: if false;

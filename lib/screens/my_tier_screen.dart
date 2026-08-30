@@ -28,6 +28,7 @@ enum _MyTierSection { created, joined }
 
 class _MyTierScreenState extends State<MyTierScreen> {
   _MyTierSection _section = _MyTierSection.created;
+  TopicCardDensity _density = TopicCardDensity.full;
 
   Future<void> _deleteTopic(BuildContext context, TierTopic topic) async {
     final confirmed = await showDialog<bool>(
@@ -129,7 +130,15 @@ class _MyTierScreenState extends State<MyTierScreen> {
                   showSelectedIcon: false,
                 ),
               ),
-              const SizedBox(height: 22),
+              const SizedBox(height: 18),
+              Align(
+                alignment: Alignment.centerRight,
+                child: TopicViewModeToggle(
+                  density: _density,
+                  onChanged: (value) => setState(() => _density = value),
+                ),
+              ),
+              const SizedBox(height: 14),
               if (topics.isEmpty)
                 EmptyState(
                   title: context.l10n.t(
@@ -147,9 +156,9 @@ class _MyTierScreenState extends State<MyTierScreen> {
               else
                 LayoutBuilder(
                   builder: (context, constraints) {
-                    final columns = AppBreakpoints.gridColumns(
-                      constraints.maxWidth,
-                    );
+                    final columns = _density == TopicCardDensity.compact
+                        ? 1
+                        : AppBreakpoints.gridColumns(constraints.maxWidth);
                     const gap = 13.0;
                     final width =
                         (constraints.maxWidth - gap * (columns - 1)) / columns;
@@ -162,6 +171,7 @@ class _MyTierScreenState extends State<MyTierScreen> {
                             width: width,
                             child: TopicCard(
                               topic: topic,
+                              density: _density,
                               liked: appState.isTopicLiked(topic.id),
                               onLike: () => appState.toggleTopicLike(topic.id),
                               managementAction:
