@@ -21,22 +21,6 @@ List<String> _imagesFor(AppLocale locale) {
   ];
 }
 
-String _ctaFor(AppLocale locale) => switch (locale) {
-  AppLocale.ja => '参加してみる',
-  AppLocale.ko => '참여해보기',
-  AppLocale.zhTw => '參與看看',
-  AppLocale.ptBr => 'Participar agora',
-  AppLocale.en => 'Try joining',
-};
-
-String _nextFor(AppLocale locale) => switch (locale) {
-  AppLocale.ja => '次へ',
-  AppLocale.ko => '다음',
-  AppLocale.zhTw => '下一步',
-  AppLocale.ptBr => 'Próximo',
-  AppLocale.en => 'Next',
-};
-
 /// 匿名アカウントでのホーム画面初回起動時に一度だけ表示する導入オーバーレイ。
 /// 各言語で用意したスライド画像(assets/onboarding/)をそのまま表示し、画面の
 /// どこをタップしても次のスライドへ進む(最終スライドでは閉じる)。右下にも
@@ -151,8 +135,8 @@ class _OnboardingOverlayState extends State<OnboardingOverlay> {
                           ),
                           label: Text(
                             isLast
-                                ? _ctaFor(widget.appState.locale)
-                                : _nextFor(widget.appState.locale),
+                                ? context.l10n.t('onboardingJoin')
+                                : context.l10n.t('onboardingNext'),
                           ),
                           style: FilledButton.styleFrom(
                             backgroundColor: AppColors.purple,

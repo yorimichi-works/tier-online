@@ -57,3 +57,10 @@ export function wikipediaLanguage(value: unknown): string {
   if (locale === "pt-br") return "pt";
   return locale;
 }
+
+export function firestoreLanguage(value: unknown): string {
+  const locale = normalizeLocale(value);
+  if (locale === "zh-tw") return "zh-TW";
+  if (locale === "pt-br") return "pt-BR";
+  return locale;
+}

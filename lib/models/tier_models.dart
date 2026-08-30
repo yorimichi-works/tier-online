@@ -89,6 +89,7 @@ class TierItem {
   final int sortIndex;
   final int colorSeed;
   final AppLocale? contentLanguage;
+  AppLocale? get sourceLanguage => contentLanguage;
   final bool isLanguageNeutral;
   bool get hasName => name?.trim().isNotEmpty ?? false;
   bool get hasImage => imageUrl?.trim().isNotEmpty ?? false;
@@ -231,6 +232,7 @@ class TierTopic {
   final int createdDaysAgo;
   final int likeCount;
   final AppLocale contentLanguage;
+  AppLocale get sourceLanguage => contentLanguage;
   final String targetRegion;
   final String categoryId;
   final String? sourceTierId;
@@ -319,6 +321,7 @@ class UserTierSubmission {
   final Map<TierRank, List<String>> placements;
   final String region;
   final AppLocale contentLanguage;
+  AppLocale get sourceLanguage => contentLanguage;
   int get placedCount =>
       placements.values.fold(0, (total, items) => total + items.length);
 }

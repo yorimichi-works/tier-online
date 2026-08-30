@@ -11,6 +11,8 @@ void main() {
     expect(codes, ['ja', 'ko', 'en', 'zh-tw', 'pt-br']);
     expect(codes.toSet(), hasLength(codes.length));
     expect(AppLocale.zhTw.hreflang, 'zh-Hant-TW');
+    expect(AppLocale.zhTw.storageCode, 'zh-TW');
+    expect(AppLocale.ptBr.storageCode, 'pt-BR');
     expect(AppLocale.ptBr.firebaseAuthCode, 'pt-BR');
   });
 
@@ -20,6 +22,10 @@ void main() {
     expect(AppLocaleParser.fromPath('/pt-br/tier/example'), AppLocale.ptBr);
     expect(
       AppLocaleParser.fromDevice(const Locale('zh', 'HK')),
+      AppLocale.zhTw,
+    );
+    expect(
+      AppLocaleParser.fromDevice(const Locale('zh', 'MO')),
       AppLocale.zhTw,
     );
   });

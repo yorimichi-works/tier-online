@@ -462,12 +462,19 @@ class _DesktopTopNavItem extends StatelessWidget {
                     : destination.icon,
               ),
               const SizedBox(width: 8),
-              Text(
-                destination.label,
-                style: TextStyle(
-                  color: selected ? Colors.white : const Color(0xFFB3B3BE),
-                  fontSize: 13,
-                  fontWeight: selected ? FontWeight.w900 : FontWeight.w700,
+              Flexible(
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    destination.label,
+                    maxLines: 1,
+                    style: TextStyle(
+                      color: selected ? Colors.white : const Color(0xFFB3B3BE),
+                      fontSize: 13,
+                      fontWeight: selected ? FontWeight.w900 : FontWeight.w700,
+                    ),
+                  ),
                 ),
               ),
             ],

@@ -41,11 +41,14 @@ class FirebaseTierRepository implements CloudTierRepository {
     required String preferredLocale,
     required String region,
   }) async {
+    final locale = AppLocaleParser.fromCode(preferredLocale) ?? AppLocale.ja;
     final reference = _users.doc(currentUserId);
     final existing = await reference.get();
     await reference.set({
       'uid': currentUserId,
-      'preferredLocale': preferredLocale,
+      // Keep the legacy route-form value while new readers use BCP 47.
+      'preferredLocale': locale.code,
+      'preferredLanguage': locale.storageCode,
       'region': region,
       'updatedAt': FieldValue.serverTimestamp(),
       if (!existing.exists) 'createdAt': FieldValue.serverTimestamp(),
@@ -59,7 +62,10 @@ class FirebaseTierRepository implements CloudTierRepository {
     final data = snapshot.data();
     if (data == null) return null;
     return (
-      preferredLocale: data['preferredLocale'] as String? ?? 'ja',
+      preferredLocale:
+          data['preferredLanguage'] as String? ??
+          data['preferredLocale'] as String? ??
+          'ja',
       region: SupportedRegion.normalize(
         data['region'] as String?,
         fallback: 'JP',
@@ -133,7 +139,8 @@ class FirebaseTierRepository implements CloudTierRepository {
           sortIndex: item.data()['sortIndex'] as int? ?? 0,
           colorSeed: item.data()['colorSeed'] as int? ?? 0,
           contentLanguage: AppLocaleParser.fromCode(
-            item.data()['contentLanguage'] as String?,
+            item.data()['sourceLanguage'] as String? ??
+                item.data()['contentLanguage'] as String?,
           ),
           isLanguageNeutral: item.data()['isLanguageNeutral'] as bool? ?? false,
         ),
@@ -163,7 +170,10 @@ class FirebaseTierRepository implements CloudTierRepository {
           ? 0
           : DateTime.now().difference(createdAt.toDate()).inDays,
       contentLanguage:
-          AppLocaleParser.fromCode(data['contentLanguage'] as String?) ??
+          AppLocaleParser.fromCode(
+            data['sourceLanguage'] as String? ??
+                data['contentLanguage'] as String?,
+          ) ??
           AppLocale.ja,
       targetRegion: SupportedRegion.normalize(
         data['targetRegion'] as String?,
@@ -225,6 +235,7 @@ class FirebaseTierRepository implements CloudTierRepository {
         'category': topic.category,
         'categoryId': topic.categoryId,
         'contentLanguage': topic.contentLanguage.code,
+        'sourceLanguage': topic.sourceLanguage.storageCode,
         'targetRegion': topic.targetRegion,
         'sourceTierId': topic.sourceTierId,
         'sourceTemplateId': topic.sourceTemplateId,
@@ -247,6 +258,7 @@ class FirebaseTierRepository implements CloudTierRepository {
               'sortIndex': item.sortIndex,
               'colorSeed': item.colorSeed,
               'contentLanguage': item.contentLanguage?.code,
+              'sourceLanguage': item.sourceLanguage?.storageCode,
               'isLanguageNeutral': item.isLanguageNeutral,
             },
         ],
@@ -326,6 +338,7 @@ class FirebaseTierRepository implements CloudTierRepository {
         ),
         'region': submission.region,
         'contentLanguage': submission.contentLanguage.code,
+        'sourceLanguage': submission.sourceLanguage.storageCode,
       }, SetOptions(merge: true));
 
   @override
@@ -349,7 +362,8 @@ class FirebaseTierRepository implements CloudTierRepository {
           ),
           contentLanguage:
               AppLocaleParser.fromCode(
-                document.data()['contentLanguage'] as String?,
+                document.data()['sourceLanguage'] as String? ??
+                    document.data()['contentLanguage'] as String?,
               ) ??
               AppLocale.ja,
         ),

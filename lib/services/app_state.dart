@@ -163,6 +163,7 @@ class AppState extends ChangeNotifier {
   ThemeMode _themeMode = ThemeMode.dark;
   bool _animationsEnabled = true;
   bool _hasSeenOnboarding = false;
+  bool _languageExplicitlySelected = false;
   AppLocale _locale = AppLocale.ja;
   String _region = 'JP';
 
@@ -195,16 +196,15 @@ class AppState extends ChangeNotifier {
   ThemeMode get themeMode => _themeMode;
   bool get animationsEnabled => _animationsEnabled;
   bool get hasSeenOnboarding => _hasSeenOnboarding;
+  bool get languageExplicitlySelected => _languageExplicitlySelected;
   AppLocale get locale => _locale;
   String get region => _region;
   String get initialPath => _initialPath;
-  String get currentUserName => switch (_locale) {
-    AppLocale.ja => 'あなた',
-    AppLocale.ko => '나',
-    AppLocale.zhTw => '你',
-    AppLocale.ptBr => 'Você',
-    AppLocale.en => 'You',
-  };
+  // 匿名ユーザーの投稿者名は、あくまで自分視点の「あなた」ではなく、
+  // 他の閲覧者にも意味が通る「匿名ユーザー」で保存・表示する。
+  String get currentUserName => isAnonymous
+      ? AppLocalizations(_locale).t('anonymousCreatorName')
+      : AppLocalizations(_locale).t('currentUserName');
   String get anonymousId => _anonymousId;
   String get currentDataUserId =>
       _cloudRepository?.currentUserId ?? _anonymousId;
@@ -356,30 +356,38 @@ class AppState extends ChangeNotifier {
     final preferences = await SharedPreferences.getInstance();
     final pathLocale = AppLocaleParser.fromPath(_initialPath);
     final savedLocale = AppLocaleParser.fromCode(
-      preferences.getString('preferredLocale'),
+      preferences.getString('preferredLanguage') ??
+          preferences.getString('preferredLocale'),
     );
-    _locale =
-        pathLocale ?? savedLocale ?? AppLocaleParser.fromDevice(_deviceLocale);
-    _region = SupportedRegion.normalize(
-      preferences.getString('region'),
-      fallback: _locale.defaultRegion,
-    );
-    if (_cloudRepository != null && pathLocale == null) {
+    _languageExplicitlySelected =
+        preferences.getBool('languageExplicitlySelected') ?? false;
+    ({String preferredLocale, String region})? remotePreferences;
+    if (_cloudRepository != null) {
       try {
-        final remote = await _cloudRepository!.loadUserPreferences();
-        if (remote != null) {
-          _locale = AppLocaleParser.fromCode(remote.preferredLocale) ?? _locale;
-          _region = SupportedRegion.normalize(
-            remote.region,
-            fallback: _locale.defaultRegion,
-          );
-          await preferences.setString('preferredLocale', _locale.code);
-          await preferences.setString('region', _region);
-        }
+        remotePreferences = await _cloudRepository!.loadUserPreferences();
       } on Object catch (error) {
         _cloudError = error;
       }
     }
+    final accountLocale = AppLocaleParser.fromCode(
+      remotePreferences?.preferredLocale,
+    );
+    // Phase 1-A priority: explicit choice > URL > account > device > ja.
+    // A legacy local value without the explicit marker remains a compatibility
+    // fallback between account and device.
+    _locale =
+        (_languageExplicitlySelected ? savedLocale : null) ??
+        pathLocale ??
+        accountLocale ??
+        savedLocale ??
+        AppLocaleParser.fromDevice(_deviceLocale);
+    _region = SupportedRegion.normalize(
+      preferences.getString('region') ?? remotePreferences?.region,
+      fallback: _locale.defaultRegion,
+    );
+    await preferences.setString('preferredLocale', _locale.code);
+    await preferences.setString('preferredLanguage', _locale.storageCode);
+    await preferences.setString('region', _region);
     _themeMode = switch (preferences.getString('themeMode')) {
       'light' => ThemeMode.light,
       'system' => ThemeMode.system,
@@ -425,7 +433,7 @@ class AppState extends ChangeNotifier {
       }
       try {
         await _cloudRepository!.saveUserPreferences(
-          preferredLocale: _locale.code,
+          preferredLocale: _locale.storageCode,
           region: _region,
         );
       } on Object catch (error) {
@@ -454,25 +462,29 @@ class AppState extends ChangeNotifier {
 
     try {
       final preferences = await SharedPreferences.getInstance();
-      if (AppLocaleParser.fromPath(_initialPath) == null) {
-        final remote = await cloudRepository.loadUserPreferences();
-        if (remote != null) {
-          _locale = AppLocaleParser.fromCode(remote.preferredLocale) ?? _locale;
-          _region = SupportedRegion.normalize(
-            remote.region,
-            fallback: _locale.defaultRegion,
-          );
-          await preferences.setString('preferredLocale', _locale.code);
-          await preferences.setString('region', _region);
-        }
+      final explicitLocale =
+          preferences.getBool('languageExplicitlySelected') ?? false;
+      final pathLocale = AppLocaleParser.fromPath(_initialPath);
+      final remote = await cloudRepository.loadUserPreferences();
+      if (!explicitLocale && pathLocale == null && remote != null) {
+        _locale = AppLocaleParser.fromCode(remote.preferredLocale) ?? _locale;
       }
+      if (remote != null && preferences.getString('region') == null) {
+        _region = SupportedRegion.normalize(
+          remote.region,
+          fallback: _locale.defaultRegion,
+        );
+      }
+      await preferences.setString('preferredLocale', _locale.code);
+      await preferences.setString('preferredLanguage', _locale.storageCode);
+      await preferences.setString('region', _region);
       for (final topic in await cloudRepository.loadTopics()) {
         _cloudTopicIds.add(topic.id);
         _repository.add(topic);
         await _localStore.saveTopic(topic);
       }
       await cloudRepository.saveUserPreferences(
-        preferredLocale: _locale.code,
+        preferredLocale: _locale.storageCode,
         region: _region,
       );
       _cloudError = null;
@@ -507,11 +519,14 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> setLocale(AppLocale value) async {
-    if (_locale == value) return;
+    final changed = _locale != value;
     _locale = value;
-    notifyListeners();
+    _languageExplicitlySelected = true;
+    if (changed) notifyListeners();
     final preferences = await SharedPreferences.getInstance();
     await preferences.setString('preferredLocale', value.code);
+    await preferences.setString('preferredLanguage', value.storageCode);
+    await preferences.setBool('languageExplicitlySelected', true);
     await _syncUserPreferences();
   }
 
@@ -529,7 +544,7 @@ class AppState extends ChangeNotifier {
     if (_cloudRepository == null) return;
     try {
       await _cloudRepository!.saveUserPreferences(
-        preferredLocale: _locale.code,
+        preferredLocale: _locale.storageCode,
         region: _region,
       );
     } on Object catch (error) {
@@ -548,7 +563,19 @@ class AppState extends ChangeNotifier {
     }
     return topic.id.startsWith('local-') ||
         topic.creatorName == currentUserName ||
-        const {'あなた', '나', 'You'}.contains(topic.creatorName);
+        // 旧仕様(自分視点の「あなた」等)で保存された既存データとの互換用。
+        const {
+          'あなた',
+          '나',
+          '你',
+          'Você',
+          'You',
+          '匿名ユーザー',
+          '익명 사용자',
+          '匿名使用者',
+          'Usuário anônimo',
+          'Anonymous user',
+        }.contains(topic.creatorName);
   }
 
   Future<void> toggleTopicLike(String topicId) async {

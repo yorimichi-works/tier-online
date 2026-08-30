@@ -894,6 +894,28 @@ void main() {
       expect(tester.takeException(), isNull);
     }
   });
+
+  testWidgets('5言語の主要ホームUIが360・390・768・1440pxで崩れない', (tester) async {
+    for (final size in const [
+      Size(360, 800),
+      Size(390, 844),
+      Size(768, 1024),
+      Size(1440, 1000),
+    ]) {
+      await tester.binding.setSurfaceSize(size);
+      for (final code in const ['ja', 'en', 'ko', 'zh-tw', 'pt-br']) {
+        SharedPreferences.setMockInitialValues({'hasSeenOnboarding': true});
+        final state = AppState(DummyTierRepository(), initialPath: '/$code/');
+        await state.initialize();
+        await tester.pumpWidget(
+          TierTableOnlineApp(key: ValueKey('$code-$size'), appState: state),
+        );
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull, reason: '$code at $size');
+      }
+    }
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+  });
 }
 
 class _AuthMenuHarness extends StatefulWidget {

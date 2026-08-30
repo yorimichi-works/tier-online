@@ -12,6 +12,7 @@ class LocaleProfile {
   const LocaleProfile({
     required this.locale,
     required this.code,
+    required this.storageCode,
     required this.flutterLocale,
     required this.nativeName,
     required this.serviceName,
@@ -23,8 +24,13 @@ class LocaleProfile {
 
   final AppLocale locale;
 
-  /// Canonical lowercase code used by routes and Firestore.
+  /// Canonical lowercase code used by routes and legacy Firestore fields.
   final String code;
+
+  /// BCP 47 code stored in new Firestore language fields.
+  ///
+  /// Routes intentionally keep using lowercase [code].
+  final String storageCode;
   final Locale flutterLocale;
   final String nativeName;
   final String serviceName;
@@ -39,6 +45,7 @@ abstract final class InternationalizationConfig {
     LocaleProfile(
       locale: AppLocale.ja,
       code: 'ja',
+      storageCode: 'ja',
       flutterLocale: Locale('ja'),
       nativeName: '日本語',
       serviceName: 'tier表オンライン',
@@ -50,6 +57,7 @@ abstract final class InternationalizationConfig {
     LocaleProfile(
       locale: AppLocale.ko,
       code: 'ko',
+      storageCode: 'ko',
       flutterLocale: Locale('ko'),
       nativeName: '한국어',
       serviceName: '티어표 온라인',
@@ -61,6 +69,7 @@ abstract final class InternationalizationConfig {
     LocaleProfile(
       locale: AppLocale.en,
       code: 'en',
+      storageCode: 'en',
       flutterLocale: Locale('en'),
       nativeName: 'English',
       serviceName: 'Tier Online',
@@ -72,11 +81,8 @@ abstract final class InternationalizationConfig {
     LocaleProfile(
       locale: AppLocale.zhTw,
       code: 'zh-tw',
-      flutterLocale: Locale.fromSubtags(
-        languageCode: 'zh',
-        scriptCode: 'Hant',
-        countryCode: 'TW',
-      ),
+      storageCode: 'zh-TW',
+      flutterLocale: Locale.fromSubtags(languageCode: 'zh', countryCode: 'TW'),
       nativeName: '繁體中文',
       serviceName: 'Tier 表線上版',
       defaultRegion: 'TW',
@@ -87,8 +93,9 @@ abstract final class InternationalizationConfig {
     LocaleProfile(
       locale: AppLocale.ptBr,
       code: 'pt-br',
+      storageCode: 'pt-BR',
       flutterLocale: Locale('pt', 'BR'),
-      nativeName: 'Português',
+      nativeName: 'Português (Brasil)',
       serviceName: 'Tier Online',
       defaultRegion: 'BR',
       firebaseAuthCode: 'pt-BR',
@@ -117,6 +124,7 @@ abstract final class InternationalizationConfig {
 extension AppLocaleValues on AppLocale {
   LocaleProfile get profile => InternationalizationConfig.profileOf(this);
   String get code => profile.code;
+  String get storageCode => profile.storageCode;
   String get nativeName => profile.nativeName;
   Locale get flutterLocale => profile.flutterLocale;
   String get serviceName => profile.serviceName;
@@ -141,7 +149,10 @@ abstract final class AppLocaleParser {
     final script = locale.scriptCode?.toLowerCase();
     if (region == 'KR' || language == 'ko') return AppLocale.ko;
     if (region == 'JP' || language == 'ja') return AppLocale.ja;
-    if (region == 'TW' || region == 'HK' || script == 'hant') {
+    if (region == 'TW' ||
+        region == 'HK' ||
+        region == 'MO' ||
+        script == 'hant') {
       return AppLocale.zhTw;
     }
     if (region == 'BR' || language == 'pt') return AppLocale.ptBr;

@@ -3,6 +3,8 @@ import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
+import '../l10n/app_localizations.dart';
+
 /// 管理者専用の簡易モデレーション画面。
 ///
 /// admins/{uid} ドキュメントが存在するユーザーのみアクセス可能(Firestore
@@ -23,19 +25,21 @@ class _AdminModerationScreenState extends State<AdminModerationScreen> {
   Widget build(BuildContext context) {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) {
-      return const Scaffold(body: Center(child: Text('ログインが必要です')));
+      return Scaffold(
+        body: Center(child: Text(context.l10n.t('adminLoginRequired'))),
+      );
     }
 
     return DefaultTabController(
       length: 3,
       child: Scaffold(
         appBar: AppBar(
-          title: const Text('モデレーション管理'),
-          bottom: const TabBar(
+          title: Text(context.l10n.t('adminModerationTitle')),
+          bottom: TabBar(
             tabs: [
-              Tab(text: '審査待ち'),
-              Tab(text: 'NGワード'),
-              Tab(text: '共有画像'),
+              Tab(text: context.l10n.t('adminReviewQueue')),
+              Tab(text: context.l10n.t('adminNgWords')),
+              Tab(text: context.l10n.t('adminSharedImages')),
             ],
           ),
         ),
@@ -49,7 +53,7 @@ class _AdminModerationScreenState extends State<AdminModerationScreen> {
               return const Center(child: CircularProgressIndicator());
             }
             if (!adminSnapshot.data!.exists) {
-              return const Center(child: Text('この画面にはアクセスできません'));
+              return Center(child: Text(context.l10n.t('adminAccessDenied')));
             }
             return const TabBarView(
               children: [
@@ -81,11 +85,11 @@ class _ModerationQueueTabState extends State<_ModerationQueueTab> {
       await FirebaseFunctions.instance
           .httpsCallable('setModerationStatus')
           .call<Map<String, dynamic>>({'topicId': topicId, 'status': status});
-    } on Object catch (error) {
+    } on Object catch (_) {
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('更新に失敗しました: $error')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(context.l10n.t('adminUpdateFailed'))),
+      );
     } finally {
       if (mounted) setState(() => _updating = false);
     }
@@ -107,7 +111,7 @@ class _ModerationQueueTabState extends State<_ModerationQueueTab> {
       }
       final docs = snapshot.data!.docs;
       if (docs.isEmpty) {
-        return const Center(child: Text('確認待ちのTier表はありません'));
+        return Center(child: Text(context.l10n.t('adminEmptyQueue')));
       }
       return ListView.separated(
         padding: const EdgeInsets.all(16),
@@ -125,8 +129,13 @@ class _ModerationQueueTabState extends State<_ModerationQueueTab> {
             child: ListTile(
               title: Text(data['title'] as String? ?? '(no title)'),
               subtitle: Text(
-                'status: $status / 通報: $reportCount件'
-                '${reasons.isNotEmpty ? '\n理由: ${reasons.join(', ')}' : ''}',
+                context.l10n.format('adminStatusReports', {
+                      'status': status,
+                      'count': reportCount,
+                    }) +
+                    (reasons.isNotEmpty
+                        ? '\n${context.l10n.format('adminReasons', {'reasons': reasons.join(', ')})}'
+                        : ''),
               ),
               isThreeLine: reasons.isNotEmpty,
               trailing: Row(
@@ -136,13 +145,13 @@ class _ModerationQueueTabState extends State<_ModerationQueueTab> {
                     onPressed: _updating
                         ? null
                         : () => _setStatus(doc.id, 'approved'),
-                    child: const Text('承認'),
+                    child: Text(context.l10n.t('adminApprove')),
                   ),
                   TextButton(
                     onPressed: _updating
                         ? null
                         : () => _setStatus(doc.id, 'blocked'),
-                    child: const Text('ブロック'),
+                    child: Text(context.l10n.t('adminBlock')),
                   ),
                 ],
               ),
@@ -190,6 +199,7 @@ class _NgWordEditorTabState extends State<_NgWordEditorTab> {
       .toList();
 
   Future<void> _load() async {
+    final loadFailed = context.l10n.t('adminLoadFailed');
     setState(() {
       _loading = true;
       _error = null;
@@ -205,8 +215,8 @@ class _NgWordEditorTabState extends State<_NgWordEditorTab> {
           .join('\n');
       _allowController.text =
           ((data['allowWords'] as List<dynamic>? ?? const [])).join('\n');
-    } on Object catch (error) {
-      _error = '読み込みに失敗しました: $error';
+    } on Object catch (_) {
+      _error = loadFailed;
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -225,12 +235,12 @@ class _NgWordEditorTabState extends State<_NgWordEditorTab> {
       if (!mounted) return;
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(const SnackBar(content: Text('保存しました')));
-    } on Object catch (error) {
+      ).showSnackBar(SnackBar(content: Text(context.l10n.t('adminSaved'))));
+    } on Object catch (_) {
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('保存に失敗しました: $error')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(context.l10n.t('adminSaveFailed'))),
+      );
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -246,7 +256,10 @@ class _NgWordEditorTabState extends State<_NgWordEditorTab> {
           children: [
             Text(_error!),
             const SizedBox(height: 8),
-            OutlinedButton(onPressed: _load, child: const Text('再読み込み')),
+            OutlinedButton(
+              onPressed: _load,
+              child: Text(context.l10n.t('reload')),
+            ),
           ],
         ),
       );
@@ -256,14 +269,14 @@ class _NgWordEditorTabState extends State<_NgWordEditorTab> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            '1行につき1語を入力してください。全角半角・空白・記号・カタカナ表記の揺れは自動で正規化されます。',
-            style: TextStyle(fontSize: 12),
+          Text(
+            context.l10n.t('adminNgInstructions'),
+            style: const TextStyle(fontSize: 12),
           ),
           const SizedBox(height: 16),
-          const Text(
-            '禁止語(blockWords) — 公開を拒否',
-            style: TextStyle(fontWeight: FontWeight.bold),
+          Text(
+            context.l10n.t('adminBlockWords'),
+            style: const TextStyle(fontWeight: FontWeight.bold),
           ),
           TextField(
             controller: _blockController,
@@ -271,9 +284,9 @@ class _NgWordEditorTabState extends State<_NgWordEditorTab> {
             decoration: const InputDecoration(border: OutlineInputBorder()),
           ),
           const SizedBox(height: 16),
-          const Text(
-            '要注意語(flagWords) — flagged扱いで公開',
-            style: TextStyle(fontWeight: FontWeight.bold),
+          Text(
+            context.l10n.t('adminFlagWords'),
+            style: const TextStyle(fontWeight: FontWeight.bold),
           ),
           TextField(
             controller: _flagController,
@@ -281,9 +294,9 @@ class _NgWordEditorTabState extends State<_NgWordEditorTab> {
             decoration: const InputDecoration(border: OutlineInputBorder()),
           ),
           const SizedBox(height: 16),
-          const Text(
-            '許可語(allowWords) — 誤検知の例外',
-            style: TextStyle(fontWeight: FontWeight.bold),
+          Text(
+            context.l10n.t('adminAllowWords'),
+            style: const TextStyle(fontWeight: FontWeight.bold),
           ),
           TextField(
             controller: _allowController,
@@ -293,7 +306,7 @@ class _NgWordEditorTabState extends State<_NgWordEditorTab> {
           const SizedBox(height: 16),
           FilledButton(
             onPressed: _saving ? null : _save,
-            child: Text(_saving ? '保存中...' : '保存する'),
+            child: Text(context.l10n.t(_saving ? 'saving' : 'save')),
           ),
         ],
       ),
@@ -328,6 +341,7 @@ class _SharedImagesTabState extends State<_SharedImagesTab> {
   }
 
   Future<void> _search() async {
+    final searchFailed = context.l10n.t('adminSearchFailed');
     setState(() {
       _loading = true;
       _error = null;
@@ -340,8 +354,8 @@ class _SharedImagesTabState extends State<_SharedImagesTab> {
       _results = raw
           .map((entry) => Map<String, dynamic>.from(entry as Map))
           .toList();
-    } on Object catch (error) {
-      _error = '検索に失敗しました: $error';
+    } on Object catch (_) {
+      _error = searchFailed;
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -359,11 +373,11 @@ class _SharedImagesTabState extends State<_SharedImagesTab> {
           () => _results[index] = {..._results[index], 'hidden': hidden},
         );
       }
-    } on Object catch (error) {
+    } on Object catch (_) {
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('更新に失敗しました: $error')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(context.l10n.t('adminUpdateFailed'))),
+      );
     } finally {
       if (mounted) setState(() => _updatingKeys.remove(key));
     }
@@ -373,19 +387,19 @@ class _SharedImagesTabState extends State<_SharedImagesTab> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('完全に削除しますか？'),
-        content: const Text('画像本体とキャッシュ情報を完全に削除します。元に戻せません。'),
+        title: Text(context.l10n.t('adminDeleteImageTitle')),
+        content: Text(context.l10n.t('adminDeleteImageBody')),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(dialogContext, false),
-            child: const Text('キャンセル'),
+            child: Text(context.l10n.t('cancel')),
           ),
           FilledButton(
             style: FilledButton.styleFrom(
               backgroundColor: Theme.of(context).colorScheme.error,
             ),
             onPressed: () => Navigator.pop(dialogContext, true),
-            child: const Text('削除'),
+            child: Text(context.l10n.t('delete')),
           ),
         ],
       ),
@@ -398,11 +412,11 @@ class _SharedImagesTabState extends State<_SharedImagesTab> {
           .call<Map<String, dynamic>>({'key': key});
       if (!mounted) return;
       setState(() => _results.removeWhere((item) => item['id'] == key));
-    } on Object catch (error) {
+    } on Object catch (_) {
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('削除に失敗しました: $error')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(context.l10n.t('adminDeleteFailed'))),
+      );
     } finally {
       if (mounted) setState(() => _updatingKeys.remove(key));
     }
@@ -418,15 +432,18 @@ class _SharedImagesTabState extends State<_SharedImagesTab> {
             Expanded(
               child: TextField(
                 controller: _queryController,
-                decoration: const InputDecoration(
-                  border: OutlineInputBorder(),
-                  hintText: 'カード名で検索(前方一致・空欄で新着順)',
+                decoration: InputDecoration(
+                  border: const OutlineInputBorder(),
+                  hintText: context.l10n.t('adminImageSearchHint'),
                 ),
                 onSubmitted: (_) => _search(),
               ),
             ),
             const SizedBox(width: 8),
-            FilledButton(onPressed: _search, child: const Text('検索')),
+            FilledButton(
+              onPressed: _search,
+              child: Text(context.l10n.t('search')),
+            ),
           ],
         ),
       ),
@@ -436,7 +453,7 @@ class _SharedImagesTabState extends State<_SharedImagesTab> {
             : _error != null
             ? Center(child: Text(_error!))
             : _results.isEmpty
-            ? const Center(child: Text('該当する画像はありません'))
+            ? Center(child: Text(context.l10n.t('adminNoImages')))
             : ListView.separated(
                 padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
                 itemCount: _results.length,
@@ -466,7 +483,7 @@ class _SharedImagesTabState extends State<_SharedImagesTab> {
                       subtitle: Text(
                         'locale: ${item['locale'] ?? '-'} / sourceTopicId: '
                         '${item['sourceTopicId'] ?? '-'}'
-                        '${hidden ? ' / 非表示中' : ''}',
+                        '${hidden ? ' / ${context.l10n.t('adminHidden')}' : ''}',
                       ),
                       isThreeLine: true,
                       trailing: Row(
@@ -476,12 +493,18 @@ class _SharedImagesTabState extends State<_SharedImagesTab> {
                             onPressed: busy
                                 ? null
                                 : () => _setHidden(key, !hidden),
-                            child: Text(hidden ? '表示に戻す' : '非表示にする'),
+                            child: Text(
+                              context.l10n.t(
+                                hidden
+                                    ? 'adminRestoreVisibility'
+                                    : 'adminHideImage',
+                              ),
+                            ),
                           ),
                           IconButton(
                             onPressed: busy ? null : () => _delete(key),
                             icon: const Icon(Icons.delete_outline_rounded),
-                            tooltip: '完全に削除',
+                            tooltip: context.l10n.t('adminDeletePermanently'),
                           ),
                         ],
                       ),

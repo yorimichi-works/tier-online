@@ -22,7 +22,11 @@ import {
 import {moderateText} from "./moderation";
 import {checkAndConsume, computeRateLimitUpdate, loadLimits, rateLimitRef} from "./rateLimit";
 import {assertTierCreationAllowed} from "./tierCreationPolicy";
-import {normalizeLocale, wikipediaLanguage} from "./internationalization";
+import {
+  firestoreLanguage,
+  normalizeLocale,
+  wikipediaLanguage,
+} from "./internationalization";
 
 initializeApp();
 // 小規模運用で突発アクセスがそのまま大量インスタンス化しないよう上限を置く。
@@ -376,6 +380,7 @@ type PublishItem = {
   sortIndex?: number;
   colorSeed?: number;
   contentLanguage?: string;
+  sourceLanguage?: string;
   isLanguageNeutral?: boolean;
 };
 
@@ -475,7 +480,8 @@ export const publishTierTopic = onCall(callableOptions, async (request) => {
       tags: data.tags ?? [],
       category: data.category,
       categoryId: data.categoryId,
-      contentLanguage: data.contentLanguage,
+      contentLanguage: normalizeLocale(data.sourceLanguage ?? data.contentLanguage),
+      sourceLanguage: firestoreLanguage(data.sourceLanguage ?? data.contentLanguage),
       targetRegion: data.targetRegion,
       sourceTierId: data.sourceTierId ?? null,
       sourceTemplateId: data.sourceTemplateId ?? null,
@@ -507,7 +513,10 @@ export const publishTierTopic = onCall(callableOptions, async (request) => {
         imageUrl: item.imageUrl ?? null,
         sortIndex: item.sortIndex ?? 0,
         colorSeed: item.colorSeed ?? 0,
-        contentLanguage: item.contentLanguage ?? null,
+        contentLanguage: item.contentLanguage || item.sourceLanguage ?
+          normalizeLocale(item.sourceLanguage ?? item.contentLanguage) : null,
+        sourceLanguage: item.contentLanguage || item.sourceLanguage ?
+          firestoreLanguage(item.sourceLanguage ?? item.contentLanguage) : null,
         isLanguageNeutral: item.isLanguageNeutral ?? false,
       });
     }
@@ -533,7 +542,7 @@ export const publishTierTopic = onCall(callableOptions, async (request) => {
       await cacheSharedUploadedImages({
         uid,
         topicId,
-        locale: normalizeLocale(data.contentLanguage),
+        locale: normalizeLocale(data.sourceLanguage ?? data.contentLanguage),
         items,
       });
     } catch (error) {

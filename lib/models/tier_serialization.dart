@@ -10,6 +10,7 @@ abstract final class TierSerialization {
     'sortIndex': item.sortIndex,
     'colorSeed': item.colorSeed,
     'contentLanguage': item.contentLanguage?.code,
+    'sourceLanguage': item.sourceLanguage?.storageCode,
     'isLanguageNeutral': item.isLanguageNeutral,
   };
 
@@ -21,7 +22,7 @@ abstract final class TierSerialization {
     sortIndex: json['sortIndex']! as int,
     colorSeed: json['colorSeed'] as int? ?? 0,
     contentLanguage: AppLocaleParser.fromCode(
-      json['contentLanguage'] as String?,
+      json['sourceLanguage'] as String? ?? json['contentLanguage'] as String?,
     ),
     isLanguageNeutral:
         json['isLanguageNeutral'] as bool? ??
@@ -104,6 +105,7 @@ abstract final class TierSerialization {
     'isTrending': topic.isTrending,
     'createdDaysAgo': topic.createdDaysAgo,
     'contentLanguage': topic.contentLanguage.code,
+    'sourceLanguage': topic.sourceLanguage.storageCode,
     'targetRegion': topic.targetRegion,
     'categoryId': topic.categoryId,
     'sourceTierId': topic.sourceTierId,
@@ -138,7 +140,10 @@ abstract final class TierSerialization {
     isTrending: json['isTrending'] as bool? ?? false,
     createdDaysAgo: json['createdDaysAgo'] as int? ?? 0,
     contentLanguage:
-        AppLocaleParser.fromCode(json['contentLanguage'] as String?) ??
+        AppLocaleParser.fromCode(
+          json['sourceLanguage'] as String? ??
+              json['contentLanguage'] as String?,
+        ) ??
         AppLocale.ja,
     targetRegion: SupportedRegion.normalize(
       json['targetRegion'] as String?,
@@ -164,6 +169,7 @@ abstract final class TierSerialization {
     ),
     'region': value.region,
     'contentLanguage': value.contentLanguage.code,
+    'sourceLanguage': value.sourceLanguage.storageCode,
   };
 
   static UserTierSubmission submissionFromJson(Map<String, Object?> json) =>
@@ -180,7 +186,10 @@ abstract final class TierSerialization {
           fallback: 'JP',
         ),
         contentLanguage:
-            AppLocaleParser.fromCode(json['contentLanguage'] as String?) ??
+            AppLocaleParser.fromCode(
+              json['sourceLanguage'] as String? ??
+                  json['contentLanguage'] as String?,
+            ) ??
             AppLocale.ja,
       );
 

@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:tier_table_online/l10n/app_localizations.dart';
 import 'package:tier_table_online/models/tier_models.dart';
+import 'package:tier_table_online/models/tier_serialization.dart';
 import 'package:tier_table_online/repositories/cloud_tier_repository.dart';
 import 'package:tier_table_online/repositories/dummy_tier_repository.dart';
 import 'package:tier_table_online/services/app_state.dart';
@@ -327,6 +328,49 @@ void main() {
     await restored.initialize();
     expect(restored.locale, AppLocale.ko);
     expect(restored.region, 'JP');
+    expect(restored.languageExplicitlySelected, isTrue);
+    final preferences = await SharedPreferences.getInstance();
+    expect(preferences.getString('preferredLanguage'), 'ko');
+  });
+
+  test('localeは手動設定・URL・アカウント・端末の順で決定する', () async {
+    SharedPreferences.setMockInitialValues({
+      'preferredLanguage': 'ko',
+      'languageExplicitlySelected': true,
+    });
+    final explicit = AppState(
+      DummyTierRepository(),
+      cloudRepository: _FakeCloudTierRepository(
+        preferences: (preferredLocale: 'en', region: 'US'),
+      ),
+      initialPath: '/pt-br/',
+      deviceLocale: const Locale('ja', 'JP'),
+    );
+    await explicit.initialize();
+    expect(explicit.locale, AppLocale.ko);
+
+    SharedPreferences.setMockInitialValues({});
+    final url = AppState(
+      DummyTierRepository(),
+      cloudRepository: _FakeCloudTierRepository(
+        preferences: (preferredLocale: 'en', region: 'US'),
+      ),
+      initialPath: '/pt-br/',
+      deviceLocale: const Locale('ja', 'JP'),
+    );
+    await url.initialize();
+    expect(url.locale, AppLocale.ptBr);
+
+    SharedPreferences.setMockInitialValues({});
+    final account = AppState(
+      DummyTierRepository(),
+      cloudRepository: _FakeCloudTierRepository(
+        preferences: (preferredLocale: 'zh-TW', region: 'TW'),
+      ),
+      deviceLocale: const Locale('ja', 'JP'),
+    );
+    await account.initialize();
+    expect(account.locale, AppLocale.zhTw);
   });
 
   test('アニメーション設定を再起動後も保持できる', () async {
@@ -375,6 +419,9 @@ void main() {
     expect(restored.targetRegion, 'KR');
     expect(restored.categoryId, 'games');
     expect(restored.sourceTierId, 'source-tier');
+    final json = TierSerialization.topicToJson(topic);
+    expect(json['sourceLanguage'], 'ko');
+    expect(json['contentLanguage'], 'ko');
   });
 
   test('未入力と旧共通説明文は閲覧言語の共通説明文へ切り替わる', () {
@@ -468,6 +515,9 @@ void main() {
 }
 
 class _FakeCloudTierRepository implements CloudTierRepository {
+  _FakeCloudTierRepository({this.preferences});
+
+  final ({String preferredLocale, String region})? preferences;
   final submissions = <UserTierSubmission>[];
   final savedSubmissions = <UserTierSubmission>[];
   final deletedTopicIds = <String>[];
@@ -577,5 +627,5 @@ class _FakeCloudTierRepository implements CloudTierRepository {
 
   @override
   Future<({String preferredLocale, String region})?>
-  loadUserPreferences() async => null;
+  loadUserPreferences() async => preferences;
 }

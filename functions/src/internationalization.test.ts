@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   hreflang,
+  firestoreLanguage,
   isSupportedLocale,
   localeFromAcceptLanguage,
   normalizeLocale,
@@ -30,4 +31,6 @@ test("external and SEO language codes are derived centrally", () => {
   assert.equal(hreflang("pt-br"), "pt-BR");
   assert.equal(wikipediaLanguage("zh-tw"), "zh");
   assert.equal(wikipediaLanguage("pt-br"), "pt");
+  assert.equal(firestoreLanguage("zh-tw"), "zh-TW");
+  assert.equal(firestoreLanguage("pt_BR"), "pt-BR");
 });

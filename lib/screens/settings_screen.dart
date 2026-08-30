@@ -527,7 +527,7 @@ class _AdminEntry extends StatelessWidget {
             Card(
               child: ListTile(
                 leading: const Icon(Icons.shield_outlined),
-                title: const Text('モデレーション管理'),
+                title: Text(context.l10n.t('adminModerationTitle')),
                 onTap: () => Navigator.of(context).push(
                   MaterialPageRoute<void>(
                     builder: (_) => const AdminModerationScreen(),
