@@ -11,6 +11,35 @@ service cloud.firestore {
         get(/databases/$(database)/documents/topics/$(topicId)).data.creatorId == request.auth.uid;
     }
 
+    function canViewTopic(topicId) {
+      let topic = get(/databases/$(database)/documents/topics/$(topicId)).data;
+      return topic.get('isPublic', true) == true ||
+        (signedIn() && topic.creatorId == request.auth.uid);
+    }
+
+    match /admins/{uid} {
+      allow read: if signedIn() && request.auth.uid == uid;
+      allow write: if false;
+    }
+
+    match /dailyTierCounters/{uid} {
+      allow read: if signedIn() && request.auth.uid == uid;
+      allow write: if false;
+    }
+
+    match /adBonusTokens/{tokenId} {
+      allow read, write: if false;
+    }
+
+    match /moderationConfig/{configId} {
+      allow read: if false;
+      allow write: if false;
+    }
+
+    match /rateLimits/{uid} {
+      allow read, write: if false;
+    }
+
     match /users/{userId} {
       allow read: if signedIn() && request.auth.uid == userId;
       allow create, update: if signedIn() && request.auth.uid == userId &&
@@ -24,10 +53,12 @@ service cloud.firestore {
     }
 
     match /topics/{topicId} {
-      allow read: if true;
-      allow create: if signedIn() &&
-        request.resource.data.creatorId == request.auth.uid &&
-        request.resource.data.get('likeCount', 0) == 0;
+      allow read: if resource.data.get('isPublic', true) == true ||
+        (signedIn() && resource.data.creatorId == request.auth.uid);
+      // 作成/公開はモデレーション・レート制限を必ず通す publishTierTopic
+      // Callable Function(Admin SDK)経由に限定し、クライアントからの直接
+      // 作成は禁止する。
+      allow create: if false;
       allow update: if signedIn() && resource.data.creatorId == request.auth.uid &&
         request.resource.data.creatorId == resource.data.creatorId &&
         request.resource.data.participants == resource.data.participants &&
@@ -39,32 +70,36 @@ service cloud.firestore {
       allow delete: if signedIn() && resource.data.creatorId == request.auth.uid;
 
       match /items/{itemId} {
-        allow read: if true;
+        allow read: if canViewTopic(topicId);
         allow write: if ownsTopic(topicId) ||
           (signedIn() &&
            getAfter(/databases/$(database)/documents/topics/$(topicId)).data.creatorId == request.auth.uid);
       }
 
       match /submissions/{userId} {
-        allow read: if true;
-        allow write: if signedIn() && request.auth.uid == userId;
+        allow read: if canViewTopic(topicId);
+        allow write: if signedIn() && request.auth.uid == userId &&
+          canViewTopic(topicId);
       }
 
       match /talks/{talkId} {
-        allow read: if true;
-        allow create, update: if signedIn();
+        allow read: if canViewTopic(topicId);
+        allow create, update: if signedIn() && canViewTopic(topicId);
         allow delete: if ownsTopic(topicId);
       }
 
       match /reports/{reportId} {
         allow create: if signedIn() &&
+          canViewTopic(topicId) &&
           request.resource.data.reporterUserId == request.auth.uid;
         allow read, update, delete: if false;
       }
 
       match /likes/{userId} {
-        allow read: if signedIn() && request.auth.uid == userId;
+        allow read: if signedIn() && request.auth.uid == userId &&
+          canViewTopic(topicId);
         allow create: if signedIn() && request.auth.uid == userId &&
+          canViewTopic(topicId) &&
           request.resource.data.userId == request.auth.uid;
         allow delete: if signedIn() && request.auth.uid == userId;
         allow update: if false;
