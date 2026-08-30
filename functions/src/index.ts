@@ -784,6 +784,83 @@ export const setModerationStatus = onCall(callableOptions, async (request) => {
   return {ok: true};
 });
 
+// 管理画面: 全Tierを検索・一覧表示する(公開/非公開・審査状態を問わない)。
+// 通常のクライアントはFirestore rules上、自分のTierか公開Tierしか読めない
+// ため、Admin SDK経由でこのCallableからのみ横断的に取得できるようにする。
+export const adminListTopics = onCall(callableOptions, async (request) => {
+  const firestore = getFirestore();
+  await assertAdmin(firestore, request);
+
+  const snapshot = await firestore
+    .collection("topics")
+    .orderBy("updatedAt", "desc")
+    .limit(500)
+    .get();
+  return {
+    results: snapshot.docs.map((doc) => {
+      const data = doc.data();
+      return {
+        id: doc.id,
+        title: (data.title as string | undefined) ?? "",
+        creatorName: (data.creatorName as string | undefined) ?? "",
+        isPublic: data.isPublic !== false,
+        moderationStatus: (data.moderationStatus as string | undefined) ?? "approved",
+        participants: (data.participants as number | undefined) ?? 0,
+        reportCount: (data.reportCount as number | undefined) ?? 0,
+      };
+    }),
+  };
+});
+
+// 管理画面: 作成者に関わらず任意のTierの公開/非公開を切り替える。
+export const adminSetTopicPublic = onCall(callableOptions, async (request) => {
+  const firestore = getFirestore();
+  await assertAdmin(firestore, request);
+
+  const topicId = request.data?.topicId;
+  const isPublic = request.data?.isPublic;
+  if (
+    typeof topicId !== "string" || topicId.length === 0 ||
+    typeof isPublic !== "boolean"
+  ) {
+    throw new HttpsError("invalid-argument", "パラメータが不正です");
+  }
+  await firestore.collection("topics").doc(topicId).set({
+    isPublic,
+    updatedAt: FieldValue.serverTimestamp(),
+  }, {merge: true});
+  return {ok: true};
+});
+
+// 管理画面: 作成者に関わらず任意のTierを削除する(通報対応・利用規約違反等)。
+export const adminDeleteTopic = onCall(callableOptions, async (request) => {
+  const firestore = getFirestore();
+  await assertAdmin(firestore, request);
+
+  const topicId = request.data?.topicId;
+  if (typeof topicId !== "string" || topicId.length === 0) {
+    throw new HttpsError("invalid-argument", "topicIdが必要です");
+  }
+  const reference = firestore.collection("topics").doc(topicId);
+  const snapshot = await reference.get();
+  if (!snapshot.exists) return {ok: true};
+  const creatorId = snapshot.data()?.creatorId as string | undefined;
+
+  await reference.set({deleting: true}, {merge: true});
+  await deleteSharedImagesForTopic(firestore, getStorage(), topicId);
+  await firestore.recursiveDelete(reference);
+  if (creatorId) {
+    try {
+      await getStorage().bucket().deleteFiles({
+        prefix: `users/${creatorId}/topics/${topicId}/`,
+      });
+    } catch (error) {
+      console.error("adminDeleteTopic: failed to clean up storage files", error);
+    }
+  }
+  return {ok: true};
+});
+
 // 管理画面: 共有画像キャッシュ(sharedItemImages)を名前の前方一致で検索する。
 // クエリが空の場合は新着順で一覧表示する。
 export const adminSearchSharedImages = onCall(callableOptions, async (request) => {

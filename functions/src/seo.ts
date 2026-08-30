@@ -171,7 +171,7 @@ ${head}
             document.getElementById('app-loading')?.setAttribute('hidden', '');
           });
         });
-      }, 250);
+      }, 500);
     }, { once: true });
   </script>
   <script>

@@ -31,7 +31,7 @@ class _AdminModerationScreenState extends State<AdminModerationScreen> {
     }
 
     return DefaultTabController(
-      length: 3,
+      length: 4,
       child: Scaffold(
         appBar: AppBar(
           title: Text(context.l10n.t('adminModerationTitle')),
@@ -40,6 +40,7 @@ class _AdminModerationScreenState extends State<AdminModerationScreen> {
               Tab(text: context.l10n.t('adminReviewQueue')),
               Tab(text: context.l10n.t('adminNgWords')),
               Tab(text: context.l10n.t('adminSharedImages')),
+              Tab(text: context.l10n.t('adminAllTopics')),
             ],
           ),
         ),
@@ -60,6 +61,7 @@ class _AdminModerationScreenState extends State<AdminModerationScreen> {
                 _ModerationQueueTab(),
                 _NgWordEditorTab(),
                 _SharedImagesTab(),
+                _AllTopicsTab(),
               ],
             );
           },
@@ -505,6 +507,223 @@ class _SharedImagesTabState extends State<_SharedImagesTab> {
                             onPressed: busy ? null : () => _delete(key),
                             icon: const Icon(Icons.delete_outline_rounded),
                             tooltip: context.l10n.t('adminDeletePermanently'),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
+      ),
+    ],
+  );
+}
+
+class _AllTopicsTab extends StatefulWidget {
+  const _AllTopicsTab();
+
+  @override
+  State<_AllTopicsTab> createState() => _AllTopicsTabState();
+}
+
+class _AllTopicsTabState extends State<_AllTopicsTab> {
+  final _queryController = TextEditingController();
+  List<Map<String, dynamic>> _all = const [];
+  List<Map<String, dynamic>> _shown = const [];
+  bool _loading = true;
+  String? _error;
+  final Set<String> _updatingIds = {};
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  @override
+  void dispose() {
+    _queryController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _load() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final result = await FirebaseFunctions.instance
+          .httpsCallable('adminListTopics')
+          .call<Map<String, dynamic>>();
+      final raw = (result.data as Map)['results'] as List<dynamic>? ?? const [];
+      _all = raw
+          .map((entry) => Map<String, dynamic>.from(entry as Map))
+          .toList();
+      _applyFilter();
+    } on Object catch (error) {
+      if (mounted) {
+        _error = '${context.l10n.t('adminUpdateFailed')}: $error';
+      }
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  void _applyFilter() {
+    final query = _queryController.text.trim().toLowerCase();
+    _shown = query.isEmpty
+        ? _all
+        : _all.where((topic) {
+            final title = (topic['title'] as String? ?? '').toLowerCase();
+            final creator = (topic['creatorName'] as String? ?? '')
+                .toLowerCase();
+            return title.contains(query) || creator.contains(query);
+          }).toList();
+  }
+
+  Future<void> _setPublic(String topicId, bool isPublic) async {
+    setState(() => _updatingIds.add(topicId));
+    try {
+      await FirebaseFunctions.instance
+          .httpsCallable('adminSetTopicPublic')
+          .call<Map<String, dynamic>>({
+            'topicId': topicId,
+            'isPublic': isPublic,
+          });
+      final index = _all.indexWhere((topic) => topic['id'] == topicId);
+      if (index != -1) {
+        setState(() {
+          _all[index] = {..._all[index], 'isPublic': isPublic};
+          _applyFilter();
+        });
+      }
+    } on Object catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('${context.l10n.t('adminUpdateFailed')}: $error')),
+      );
+    } finally {
+      if (mounted) setState(() => _updatingIds.remove(topicId));
+    }
+  }
+
+  Future<void> _delete(String topicId, String title) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(context.l10n.t('deleteTierConfirmTitle')),
+        content: Text('$title\n\n${context.l10n.t('deleteTierConfirmBody')}'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: Text(context.l10n.t('cancel')),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(context).colorScheme.error,
+            ),
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: Text(context.l10n.t('delete')),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    setState(() => _updatingIds.add(topicId));
+    try {
+      await FirebaseFunctions.instance
+          .httpsCallable('adminDeleteTopic')
+          .call<Map<String, dynamic>>({'topicId': topicId});
+      if (!mounted) return;
+      setState(() {
+        _all.removeWhere((topic) => topic['id'] == topicId);
+        _applyFilter();
+      });
+    } on Object catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('${context.l10n.t('adminUpdateFailed')}: $error')),
+      );
+    } finally {
+      if (mounted) setState(() => _updatingIds.remove(topicId));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => Column(
+    children: [
+      Padding(
+        padding: const EdgeInsets.all(16),
+        child: Row(
+          children: [
+            Expanded(
+              child: TextField(
+                controller: _queryController,
+                decoration: InputDecoration(
+                  border: const OutlineInputBorder(),
+                  hintText: context.l10n.t('adminAllTopicsSearchHint'),
+                ),
+                onChanged: (_) => setState(_applyFilter),
+              ),
+            ),
+            const SizedBox(width: 8),
+            IconButton(
+              onPressed: _loading ? null : _load,
+              icon: const Icon(Icons.refresh_rounded),
+              tooltip: context.l10n.t('adminReload'),
+            ),
+          ],
+        ),
+      ),
+      Expanded(
+        child: _loading
+            ? const Center(child: CircularProgressIndicator())
+            : _error != null
+            ? Center(child: Text(_error!))
+            : _shown.isEmpty
+            ? Center(child: Text(context.l10n.t('adminEmptyQueue')))
+            : ListView.separated(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                itemCount: _shown.length,
+                separatorBuilder: (_, _) => const SizedBox(height: 8),
+                itemBuilder: (context, index) {
+                  final topic = _shown[index];
+                  final id = topic['id'] as String;
+                  final isPublic = topic['isPublic'] == true;
+                  final busy = _updatingIds.contains(id);
+                  return Card(
+                    child: ListTile(
+                      title: Text(topic['title'] as String? ?? '(no title)'),
+                      subtitle: Text(
+                        'by ${topic['creatorName'] ?? '-'} / '
+                        '${context.l10n.format('adminStatusReports', {
+                              'status': topic['moderationStatus'] ?? '-',
+                              'count': topic['reportCount'] ?? 0,
+                            })}'
+                        '${isPublic ? '' : ' / ${context.l10n.t('privateTier')}'}',
+                      ),
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          TextButton(
+                            onPressed: busy
+                                ? null
+                                : () => _setPublic(id, !isPublic),
+                            child: Text(
+                              context.l10n.t(
+                                isPublic ? 'makePrivate' : 'makePublic',
+                              ),
+                            ),
+                          ),
+                          IconButton(
+                            onPressed: busy
+                                ? null
+                                : () => _delete(
+                                    id,
+                                    topic['title'] as String? ?? '',
+                                  ),
+                            icon: const Icon(Icons.delete_outline_rounded),
+                            tooltip: context.l10n.t('delete'),
                           ),
                         ],
                       ),
