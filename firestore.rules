@@ -25,7 +25,7 @@ service cloud.firestore {
     }
 
     function translationFieldsUnchanged() {
-      return request.resource.data.diff(resource.data).affectedKeys().hasNone([
+      return !request.resource.data.diff(resource.data).affectedKeys().hasAny([
         'translations',
         'translationStatus',
         'contentVersion',
