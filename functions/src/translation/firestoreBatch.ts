@@ -7,6 +7,12 @@ import {
 } from "firebase-admin/firestore";
 import {randomUUID} from "node:crypto";
 
+import {
+  CustomTag,
+  customTagsFromUnknown,
+  searchTagsFor,
+} from "../customTags";
+import {topicSearchTokens} from "../searchTokens";
 import {DEFAULT_DICTIONARY_VERSION} from "./phase1d";
 import {
   DEFAULT_PROMPT_VERSION,
@@ -23,6 +29,7 @@ import {
   pendingTranslationsAfterStaleBatch,
   sourceLanguageOf,
   targetLanguagesFor,
+  translationStatusesForTopic,
   translationsOf,
   validateTranslatedBatch,
 } from "./translationBatch";
@@ -37,6 +44,7 @@ export type ImportReport = {
   versionMismatches: string[];
   ineligible: string[];
   missing: string[];
+  batchMismatches: string[];
   skippedManual: Array<{documentId: string; language: string}>;
   statusCounts: Record<string, number>;
   translationStats: {
@@ -69,9 +77,10 @@ export const fetchAndClaimPending = async (
     dryRun?: boolean;
   },
 ): Promise<SourceBatch> => {
+  // moderationStatus未設定の古いTierも対象にしたいので、クエリではisPublic
+  // だけで絞り込み、承認判定はisTranslationCandidate側に任せる。
   const snapshot = await firestore.collection("topics")
     .where("isPublic", "==", true)
-    .where("moderationStatus", "==", "approved")
     .limit(options.scanLimit)
     .get();
   const claimed: Array<{
@@ -134,6 +143,10 @@ export const fetchAndClaimPending = async (
       context: {
         ...(typeof claimedTopic.data.categoryId === "string" ?
           {categoryId: claimedTopic.data.categoryId} : {}),
+        ...(Array.isArray(claimedTopic.data.customTags) &&
+            claimedTopic.data.customTags.length > 0 ? {
+          tagTranslationInstructions: "Translate each custom tag using the Tier title, description, and surrounding tags as context. Preserve each tagId and sourceText exactly. Do not merge tags whose translations happen to match. Use translation:null and status:ambiguous when the context is insufficient.",
+        } : {}),
       },
       content: buildSourceContent(claimedTopic.data, itemSnapshot.docs.map((item) => ({
         id: item.id,
@@ -173,7 +186,7 @@ const cleanTranslatedLocale = (
     batchId,
     translatedAt: FieldValue.serverTimestamp(),
   };
-  for (const key of ["title", "description", "category", "tags", "itemNames", "translationErrorCode"]) {
+  for (const key of ["title", "description", "category", "customTags", "tags", "itemNames", "translationErrorCode"]) {
     if (value[key] !== undefined) result[key] = value[key];
   }
   if (value.status === "failed" && result.translationErrorCode === undefined) {
@@ -181,6 +194,58 @@ const cleanTranslatedLocale = (
   }
   return result;
 };
+
+const mergeCustomTagTranslations = (
+  currentValue: unknown,
+  incomingValue: unknown,
+  language: string,
+): CustomTag[] => {
+  const current = customTagsFromUnknown(currentValue);
+  if (!Array.isArray(incomingValue)) return current;
+  const incomingById = new Map<string, Record<string, unknown>>();
+  for (const value of incomingValue) {
+    if (typeof value !== "object" || value === null || Array.isArray(value)) continue;
+    const tag = value as Record<string, unknown>;
+    if (typeof tag.tagId === "string") incomingById.set(tag.tagId, tag);
+  }
+  return current.map((tag) => {
+    const incoming = incomingById.get(tag.id);
+    const existing = tag.translations[language];
+    // Manual entries are an explicit human decision and must survive both
+    // source edits and a later automated batch import.
+    if (!incoming || existing?.status === "manual" ||
+        existing?.status === "translated" || existing?.status === "ambiguous") {
+      return tag;
+    }
+    const status = incoming.status;
+    if (status !== "translated" && status !== "ambiguous" && status !== "failed") {
+      return tag;
+    }
+    const text = status === "translated" && typeof incoming.translation === "string" &&
+        incoming.translation.trim().length > 0 ? incoming.translation.trim() : null;
+    return {
+      ...tag,
+      translations: {
+        ...tag.translations,
+        [language]: {
+          text,
+          status,
+          ...(typeof incoming.confidence === "number" ?
+            {confidence: incoming.confidence} : {}),
+        },
+      },
+    };
+  });
+};
+
+type ImportOutcome =
+  | {kind: "missing" | "versionMismatch" | "ineligible" | "idempotent" | "batchMismatch"}
+  | {
+    kind: "updated";
+    status: string;
+    skippedManual: Array<{documentId: string; language: string}>;
+    stats: ImportReport["translationStats"];
+  };
 
 export const importTranslatedBatch = async (
   firestore: Firestore,
@@ -202,6 +267,7 @@ export const importTranslatedBatch = async (
     versionMismatches: [],
     ineligible: [],
     missing: [],
+    batchMismatches: [],
     skippedManual: [],
     statusCounts: {},
     translationStats: {
@@ -218,60 +284,70 @@ export const importTranslatedBatch = async (
   for (const translatedItem of translated.items) {
     const sourceItem = sourceById.get(translatedItem.documentId)!;
     const reference = firestore.collection("topics").doc(translatedItem.documentId);
-    await firestore.runTransaction(async (transaction) => {
+    const outcome: ImportOutcome = await firestore.runTransaction(
+      async (transaction): Promise<ImportOutcome> => {
       const snapshot = await transaction.get(reference);
       if (!snapshot.exists) {
-        report.missing.push(translatedItem.documentId);
-        return;
+        return {kind: "missing"};
       }
       const data = snapshot.data() as Record<string, unknown>;
       const currentVersion = contentVersionOf(data);
       if (currentVersion !== translatedItem.sourceContentVersion) {
-        report.versionMismatches.push(translatedItem.documentId);
         if (!dryRun) transaction.set(reference, {
           translationStatus: "pending",
           translationBatchId: FieldValue.delete(),
           processingStartedAt: FieldValue.delete(),
           translationUpdatedAt: FieldValue.serverTimestamp(),
         }, {merge: true});
-        return;
+        return {kind: "versionMismatch"};
       }
-      if (data.isPublic === false || data.moderationStatus !== "approved") {
-        report.ineligible.push(translatedItem.documentId);
+      if (data.isPublic === false ||
+        (data.moderationStatus != null && data.moderationStatus !== "approved")) {
         if (!dryRun) transaction.set(reference, {
           translationStatus: "pending",
           translationBatchId: FieldValue.delete(),
           processingStartedAt: FieldValue.delete(),
           translationUpdatedAt: FieldValue.serverTimestamp(),
         }, {merge: true});
-        return;
+        return {kind: "ineligible"};
       }
       if (
         data.lastTranslationBatchId === source.batchId &&
         data.translationStatus !== "processing"
       ) {
-        report.idempotent.push(translatedItem.documentId);
-        return;
+        return {kind: "idempotent"};
       }
       if (data.translationBatchId !== source.batchId) {
-        throw new Error(`${translatedItem.documentId}: Firestore batchId mismatch`);
+        // Another worker owns this document. Record the conflict and continue
+        // importing independent items instead of aborting the whole batch.
+        return {kind: "batchMismatch"};
       }
       const existing = translationsOf(data);
       const next: Record<string, unknown> = {...existing};
+      let nextCustomTags = customTagsFromUnknown(data.customTags);
+      const skippedManual: Array<{documentId: string; language: string}> = [];
+      const stats: ImportReport["translationStats"] = {
+        total: 0,
+        cacheHits: 0,
+        codexTranslations: 0,
+        manualSkipped: 0,
+        failed: 0,
+        reviewRequired: 0,
+      };
       for (const language of sourceItem.targetLanguages) {
         const current = existing[language];
         if (current?.translationMode === "manual") {
-          report.skippedManual.push({documentId: translatedItem.documentId, language});
-          report.translationStats.manualSkipped += 1;
+          skippedManual.push({documentId: translatedItem.documentId, language});
+          stats.manualSkipped += 1;
           continue;
         }
         const incoming = translatedItem.translations[language];
         if (incoming) {
-          report.translationStats.total += 1;
-          if (incoming.cacheHit) report.translationStats.cacheHits += 1;
-          else report.translationStats.codexTranslations += 1;
-          if (incoming.status === "failed") report.translationStats.failed += 1;
-          if (incoming.reviewRequired) report.translationStats.reviewRequired += 1;
+          stats.total += 1;
+          if (incoming.cacheHit) stats.cacheHits += 1;
+          else stats.codexTranslations += 1;
+          if (incoming.status === "failed") stats.failed += 1;
+          if (incoming.reviewRequired) stats.reviewRequired += 1;
           const dictionaryVersion = (sourceItem as SourceBatchItem & {
             translationContext?: {dictionaryVersion?: string};
           }).translationContext?.dictionaryVersion ?? DEFAULT_DICTIONARY_VERSION;
@@ -282,34 +358,70 @@ export const importTranslatedBatch = async (
             source.batchId,
             dictionaryVersion,
           );
+          nextCustomTags = mergeCustomTagTranslations(
+            nextCustomTags,
+            incoming.customTags,
+            language,
+          );
         } else if (current?.batchId === source.batchId) {
           next[language] = {...current, status: "pending"};
         }
       }
-      const sourceLanguage = sourceLanguageOf(data);
-      const statuses = (["ja", "en", "ko", "zh-TW", "pt-BR"] as TranslationLanguage[])
-        .filter((language) => language !== sourceLanguage)
-        .map((language) => {
-          const translation = next[language] as Record<string, unknown> | undefined;
-          if (translation?.translationMode === "manual") {
-            return String(translation.status ?? "completed");
-          }
-          if (translation?.sourceContentVersion !== currentVersion) return "pending";
-          return String(translation?.status ?? "pending");
-        }) as Array<"pending" | "processing" | "completed" | "failed" | "review_required">;
+      const statuses = translationStatusesForTopic(
+        data,
+        next as ReturnType<typeof translationsOf>,
+      );
       const status = aggregateTranslationStatus(statuses);
-      report.updated.push({documentId: translatedItem.documentId, status});
-      report.statusCounts[status] = (report.statusCounts[status] ?? 0) + 1;
       if (!dryRun) transaction.set(reference, {
         translations: next,
+        ...(nextCustomTags.length > 0 ? {
+          customTags: nextCustomTags,
+          searchTags: searchTagsFor(nextCustomTags),
+          searchTokens: topicSearchTokens([
+            data.title,
+            data.description,
+            data.category,
+            data.categoryId,
+            ...searchTagsFor(nextCustomTags),
+            ...Object.values(sourceItem.content.itemNames ?? {}),
+          ]),
+        } : {}),
         translationStatus: status,
         hasTranslationReviewRequired: statuses.includes("review_required"),
+        hasTranslationFailures: statuses.includes("failed"),
         translationBatchId: FieldValue.delete(),
         processingStartedAt: FieldValue.delete(),
         lastTranslationBatchId: source.batchId,
         translationUpdatedAt: FieldValue.serverTimestamp(),
       }, {merge: true});
+      return {kind: "updated", status, skippedManual, stats};
     });
+    switch (outcome.kind) {
+    case "missing":
+      report.missing.push(translatedItem.documentId);
+      break;
+    case "versionMismatch":
+      report.versionMismatches.push(translatedItem.documentId);
+      break;
+    case "ineligible":
+      report.ineligible.push(translatedItem.documentId);
+      break;
+    case "idempotent":
+      report.idempotent.push(translatedItem.documentId);
+      break;
+    case "batchMismatch":
+      report.batchMismatches.push(translatedItem.documentId);
+      break;
+    case "updated":
+      report.updated.push({documentId: translatedItem.documentId, status: outcome.status});
+      report.statusCounts[outcome.status] =
+        (report.statusCounts[outcome.status] ?? 0) + 1;
+      report.skippedManual.push(...outcome.skippedManual);
+      for (const key of Object.keys(outcome.stats) as Array<keyof typeof outcome.stats>) {
+        report.translationStats[key] += outcome.stats[key];
+      }
+      break;
+    }
   }
   report.finishedAt = new Date().toISOString();
   return report;
@@ -327,6 +439,23 @@ export type ReviewExport = {
   }>;
 };
 
+export const staleTranslationUpdate = (
+  data: Record<string, unknown>,
+  batchId: unknown,
+) => {
+  const translations = pendingTranslationsAfterStaleBatch(data, batchId);
+  const statuses = translationStatusesForTopic(
+    data,
+    translations as ReturnType<typeof translationsOf>,
+  );
+  return {
+    translations,
+    translationStatus: aggregateTranslationStatus(statuses),
+    hasTranslationReviewRequired: statuses.includes("review_required"),
+    hasTranslationFailures: statuses.includes("failed"),
+  };
+};
+
 export const exportReviewRequired = async (
   firestore: Firestore,
   limit: number,
@@ -338,7 +467,8 @@ export const exportReviewRequired = async (
   const items: ReviewExport["items"] = [];
   for (const document of snapshot.docs) {
     const data = document.data() as Record<string, unknown>;
-    if (data.isPublic === false || data.moderationStatus !== "approved") continue;
+    if (data.isPublic === false ||
+      (data.moderationStatus != null && data.moderationStatus !== "approved")) continue;
     const reviewTranslations = Object.fromEntries(Object.entries(translationsOf(data))
       .filter(([, translation]) => translation?.reviewRequired === true));
     if (Object.keys(reviewTranslations).length === 0) continue;
@@ -371,11 +501,10 @@ export const resetStaleProcessing = async (
   for (const document of snapshot.docs) {
     const data = document.data() as Record<string, unknown>;
     const batchId = data.translationBatchId;
-    const next = pendingTranslationsAfterStaleBatch(data, batchId);
+    const update = staleTranslationUpdate(data, batchId);
     reset.push(document.id);
     if (!dryRun) await document.ref.set({
-      translations: next,
-      translationStatus: "pending",
+      ...update,
       translationBatchId: FieldValue.delete(),
       processingStartedAt: FieldValue.delete(),
       translationUpdatedAt: FieldValue.serverTimestamp(),

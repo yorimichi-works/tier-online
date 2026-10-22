@@ -24,11 +24,40 @@ export function normalizeLocale(
   value: unknown,
   fallback: SupportedLocale = "en",
 ): SupportedLocale {
-  if (typeof value !== "string") return fallback;
+  return parseSupportedLocale(value) ?? fallback;
+}
+
+export function parseSupportedLocale(
+  value: unknown,
+): SupportedLocale | undefined {
+  if (typeof value !== "string") return undefined;
   const normalized = value.trim().toLowerCase().replace(/_/g, "-");
   if (normalized === "zh" || normalized === "zh-hant") return "zh-tw";
   if (normalized === "pt") return "pt-br";
-  return isSupportedLocale(normalized) ? normalized : fallback;
+  if (isSupportedLocale(normalized)) return normalized;
+  const language = normalized.split("-")[0];
+  if (language === "ja" || language === "ko" || language === "en") {
+    return language;
+  }
+  if (language === "zh") return "zh-tw";
+  if (language === "pt") return "pt-br";
+  return undefined;
+}
+
+export function resolveLocalizedValue<T>(
+  requested: SupportedLocale,
+  values: Partial<Record<SupportedLocale, T>>,
+): T | undefined {
+  if (values[requested] !== undefined) return values[requested];
+  const language = requested.split("-")[0];
+  for (const locale of SUPPORTED_LOCALES) {
+    if (locale.split("-")[0] === language && values[locale] !== undefined) {
+      return values[locale];
+    }
+  }
+  return values.en ?? values.ja ??
+    SUPPORTED_LOCALES.map((locale) => values[locale])
+      .find((value) => value !== undefined);
 }
 
 export function localeFromAcceptLanguage(
@@ -39,7 +68,7 @@ export function localeFromAcceptLanguage(
   const primary = header.split(",")[0]?.trim().toLowerCase() ?? "";
   if (primary.startsWith("ko")) return "ko";
   if (primary.startsWith("ja")) return "ja";
-  if (primary.startsWith("zh-tw") || primary.startsWith("zh-hant")) return "zh-tw";
+  if (primary.startsWith("zh")) return "zh-tw";
   if (primary.startsWith("pt")) return "pt-br";
   if (primary.startsWith("en")) return "en";
   return fallback;

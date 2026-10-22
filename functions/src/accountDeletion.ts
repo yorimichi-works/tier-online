@@ -43,16 +43,20 @@ export async function deleteSharedImagesForTopic(
   storage: ReturnType<typeof getStorage>,
   topicId: string,
 ): Promise<void> {
-  const snapshot = await firestore.collection("sharedItemImages")
-    .where("sourceTopicId", "==", topicId)
-    .get();
-  await Promise.all(snapshot.docs.map(async (document) => {
-    const storagePath = document.data().storagePath;
-    if (typeof storagePath === "string" && storagePath.length > 0) {
-      await storage.bucket().file(storagePath).delete({ignoreNotFound: true});
-    }
-    await document.ref.delete();
-  }));
+  const query = firestore.collectionGroup("variants")
+    .where("sourceTopicId", "==", topicId);
+  while (true) {
+    const snapshot = await query.limit(100).get();
+    if (snapshot.empty) return;
+    await Promise.all(snapshot.docs.map(async (document) => {
+      const storagePath = document.data().storagePath;
+      if (typeof storagePath === "string" && storagePath.length > 0) {
+        await storage.bucket().file(storagePath).delete({ignoreNotFound: true});
+      }
+      await document.ref.delete();
+    }));
+    if (snapshot.size < 100) return;
+  }
 }
 
 async function deleteOwnedTopics(
@@ -60,10 +64,13 @@ async function deleteOwnedTopics(
   storage: ReturnType<typeof getStorage>,
   uid: string,
 ): Promise<void> {
-  const snapshot = await firestore.collection("topics")
-    .where("creatorId", "==", uid)
-    .get();
-  for (const topic of snapshot.docs) {
+  const query = firestore.collection("topics").where("creatorId", "==", uid);
+  // Each recursive delete may itself fan out.  Work through a small page so a
+  // prolific account never requires every owned topic in Function memory.
+  while (true) {
+    const snapshot = await query.limit(20).get();
+    if (snapshot.empty) return;
+    for (const topic of snapshot.docs) {
     if (topic.id.startsWith("starter-")) {
       // Legacy starter documents may have inherited the UID of the first
       // participant. Preserve them and repair their official ownership.
@@ -85,28 +92,57 @@ async function deleteOwnedTopics(
       ),
     ]);
     await firestore.recursiveDelete(topic.ref);
+    }
+    if (snapshot.size < 20) return;
   }
 }
 
 async function deleteTalkData(firestore: Firestore, uid: string): Promise<void> {
-  const [authored, containingReplies] = await Promise.all([
-    firestore.collectionGroup("talks").where("authorUserId", "==", uid).get(),
-    firestore.collectionGroup("talks")
-      .where("replyAuthorIds", "array-contains", uid)
-      .get(),
+  const containingReplies = firestore.collectionGroup("talks")
+    .where("replyAuthorIds", "array-contains", uid);
+  while (true) {
+    const snapshot = await containingReplies.limit(100).get();
+    if (snapshot.empty) break;
+    for (const document of snapshot.docs) {
+      // Do not rewrite a large legacy array when the complete authored parent
+      // is being removed. Recursively remove its new-format reply subtree as
+      // well; deleting only the parent document would leave orphan replies.
+      if (document.data().authorUserId === uid) {
+        await firestore.recursiveDelete(document.ref);
+        continue;
+      }
+      const replies = Array.isArray(document.data().replies) ?
+        document.data().replies as RawReply[] : [];
+      const filtered = removeRepliesByAuthor(replies, uid);
+      await document.ref.update({
+        replies: filtered,
+        replyAuthorIds: collectReplyAuthorIds(filtered),
+      });
+    }
+    if (snapshot.size < 100) break;
+  }
+
+  // Authored parent comments without legacy replies are not returned by the
+  // `replyAuthorIds` query above. Use recursive deletion so their replies are
+  // never orphaned in Firestore.
+  const authoredTalks = firestore.collectionGroup("talks")
+    .where("authorUserId", "==", uid);
+  while (true) {
+    const snapshot = await authoredTalks.limit(20).get();
+    if (snapshot.empty) break;
+    for (const document of snapshot.docs) {
+      await firestore.recursiveDelete(document.ref);
+    }
+    if (snapshot.size < 20) break;
+  }
+
+  await Promise.all([
+    // New replies do not live inside a growing parent array and can be removed
+    // in fixed-size batches.
+    deleteQueryDocuments(
+      firestore.collectionGroup("replies").where("authorUserId", "==", uid),
+    ),
   ]);
-  const authoredPaths = new Set(authored.docs.map((document) => document.ref.path));
-  await Promise.all(authored.docs.map((document) => document.ref.delete()));
-  await Promise.all(containingReplies.docs.map(async (document) => {
-    if (authoredPaths.has(document.ref.path)) return;
-    const replies = Array.isArray(document.data().replies) ?
-      document.data().replies as RawReply[] : [];
-    const filtered = removeRepliesByAuthor(replies, uid);
-    await document.ref.update({
-      replies: filtered,
-      replyAuthorIds: collectReplyAuthorIds(filtered),
-    });
-  }));
 }
 
 export async function deleteAccountData(
@@ -131,6 +167,12 @@ export async function deleteAccountData(
     deleteQueryDocuments(
       firestore.collection("adBonusTokens").where("uid", "==", uid),
     ),
+    deleteQueryDocuments(
+      firestore.collection("users").doc(uid).collection("participations"),
+    ),
+    deleteQueryDocuments(
+      firestore.collection("users").doc(uid).collection("likeRefs"),
+    ),
     deleteTalkData(firestore, uid),
     // Storageの残存ファイル掃除の失敗でアカウント削除全体を止めない。
     storage.bucket().deleteFiles({prefix: `users/${uid}/`}).catch((error) => {
@@ -142,5 +184,47 @@ export async function deleteAccountData(
     firestore.doc(`dailyTierCounters/${uid}`).delete(),
     firestore.doc(`rateLimits/${uid}`).delete(),
     firestore.doc(`admins/${uid}`).delete(),
+  ]);
+}
+
+/// Firebase Auth's automatic anonymous-account cleanup removes only the Auth
+/// record.  Keep the actual submission documents (they contribute to the
+/// public Tier aggregate), but remove every other user-owned artifact once the
+/// Auth record is confirmed gone.
+export async function deleteExpiredAnonymousData(
+  firestore: Firestore,
+  storage: ReturnType<typeof getStorage>,
+  uid: string,
+): Promise<void> {
+  await deleteOwnedTopics(firestore, storage, uid);
+  await Promise.all([
+    deleteQueryDocuments(
+      firestore.collectionGroup("likes").where("userId", "==", uid),
+    ),
+    deleteQueryDocuments(
+      firestore.collectionGroup("reports").where("reporterUserId", "==", uid),
+    ),
+    deleteQueryDocuments(
+      firestore.collection("contactRequests").where("uid", "==", uid),
+    ),
+    deleteQueryDocuments(
+      firestore.collection("adBonusTokens").where("uid", "==", uid),
+    ),
+    deleteQueryDocuments(
+      firestore.collection("users").doc(uid).collection("participations"),
+    ),
+    deleteQueryDocuments(
+      firestore.collection("users").doc(uid).collection("likeRefs"),
+    ),
+    deleteTalkData(firestore, uid),
+    storage.bucket().deleteFiles({prefix: `users/${uid}/`}).catch((error) => {
+      console.error("deleteExpiredAnonymousData: failed to clean storage", error);
+    }),
+  ]);
+  await Promise.all([
+    firestore.doc(`users/${uid}`).delete(),
+    firestore.doc(`dailyTierCounters/${uid}`).delete(),
+    firestore.doc(`rateLimits/${uid}`).delete(),
+    firestore.doc(`anonymousUserLifecycle/${uid}`).delete(),
   ]);
 }

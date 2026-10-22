@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import {importTranslatedBatch} from "./firestoreBatch";
+import {importTranslatedBatch, staleTranslationUpdate} from "./firestoreBatch";
 import {DEFAULT_DICTIONARY_VERSION} from "./phase1d";
 import {
   DEFAULT_PROMPT_VERSION,
@@ -14,7 +14,9 @@ import {
   pendingTranslationsAfterSourceChange,
   pendingTranslationsAfterStaleBatch,
   sourceFingerprint,
+  sourceLanguageOf,
   targetLanguagesFor,
+  translationStatusesForTopic,
   validateTranslatedBatch,
 } from "./translationBatch";
 
@@ -73,6 +75,12 @@ test("only approved public pending UGC becomes a candidate", () => {
   assert.equal(isTranslationCandidate({...baseTopic(), isPublic: false}), false);
   assert.equal(isTranslationCandidate({...baseTopic(), moderationStatus: "flagged"}), false);
   assert.equal(isTranslationCandidate({...baseTopic(), translationStatus: "processing"}), false);
+});
+
+test("sourceLocale is preferred while sourceLanguage remains compatible", () => {
+  assert.equal(sourceLanguageOf({sourceLocale: "ko", sourceLanguage: "ja"}), "ko");
+  assert.equal(sourceLanguageOf({sourceLanguage: "pt-BR"}), "pt-BR");
+  assert.equal(sourceLanguageOf({contentLanguage: "zh-Hant"}), "zh-TW");
 });
 
 test("source, current completed, manual, and processing locales are skipped", () => {
@@ -159,6 +167,54 @@ test("all five source languages validate with at most four target languages", ()
   assert.equal(report.translationCount, 20);
 });
 
+test("structured custom tags preserve IDs, permit translation collisions, and allow ambiguity", () => {
+  const source: SourceBatch = {
+    schemaVersion: 1,
+    batchId: "tr_custom_tags",
+    createdAt: "2026-09-01T00:00:00.000Z",
+    targetLanguages: ["ko"],
+    items: [{
+      documentId: "topic-custom-tags",
+      contentVersion: 1,
+      sourceLanguage: "ja",
+      targetLanguages: ["ko"],
+      context: {tagTranslationInstructions: "Use the Tier context."},
+      content: {
+        title: "付き合いたいアニメキャラTier",
+        description: "恋人にしたいキャラクターを評価します。",
+        customTags: [
+          {tagId: "tag_ideal", sourceText: "理想"},
+          {tagId: "tag_over", sourceText: "以上"},
+          {tagId: "tag_abnormal", sourceText: "異常"},
+        ],
+      },
+    }],
+  };
+  const translated: TranslatedBatch = {
+    schemaVersion: 1,
+    batchId: source.batchId,
+    items: [{
+      documentId: "topic-custom-tags",
+      sourceContentVersion: 1,
+      translations: {
+        ko: {
+          status: "completed",
+          title: "사귀고 싶은 애니 캐릭터 티어표",
+          description: "연인으로 삼고 싶은 캐릭터를 평가합니다.",
+          customTags: [
+            {tagId: "tag_ideal", sourceText: "理想", translation: "이상", status: "translated", confidence: 0.9},
+            {tagId: "tag_over", sourceText: "以上", translation: null, status: "ambiguous", confidence: 0.3},
+            {tagId: "tag_abnormal", sourceText: "異常", translation: "이상", status: "translated", confidence: 0.8},
+          ],
+          reviewRequired: false,
+        },
+      },
+    }],
+  };
+  const report = validateTranslatedBatch(source, translated);
+  assert.equal(report.valid, true, report.errors.join("\n"));
+});
+
 test("validation rejects batch, version, ID, locale, unknown field, and empty text", () => {
   const source = makeSourceBatch();
   const translated = makeTranslatedBatch(source) as unknown as Record<string, unknown>;
@@ -191,7 +247,35 @@ test("partial, review-required, failed, and completed top statuses are determini
   assert.equal(aggregateTranslationStatus(["completed", "completed"]), "completed");
   assert.equal(aggregateTranslationStatus(["completed", "failed"]), "partial");
   assert.equal(aggregateTranslationStatus(["failed", "failed"]), "failed");
+  assert.equal(aggregateTranslationStatus(["failed", "pending"]), "failed");
   assert.equal(aggregateTranslationStatus(["completed", "review_required"]), "review_required");
+});
+
+test("stale reset preserves completed locales and recomputes a partial top status", () => {
+  const data = {
+    sourceLanguage: "ja",
+    contentVersion: 2,
+    translations: {
+      en: {
+        status: "completed",
+        sourceContentVersion: 2,
+        translationMode: "auto",
+      },
+      ko: {
+        status: "processing",
+        sourceContentVersion: 2,
+        translationMode: "auto",
+        batchId: "tr_stale",
+      },
+    },
+  };
+  const next = pendingTranslationsAfterStaleBatch(data, "tr_stale");
+  const statuses = translationStatusesForTopic(data, next as never);
+  assert.deepEqual(statuses, ["completed", "pending", "pending", "pending"]);
+  assert.equal(aggregateTranslationStatus(statuses), "partial");
+  const update = staleTranslationUpdate(data, "tr_stale");
+  assert.equal(update.translationStatus, "partial");
+  assert.equal(update.hasTranslationFailures, false);
 });
 
 test("stale processing reset affects only the matching batch and is idempotent", () => {
@@ -279,6 +363,75 @@ test("import dry-run does not write and a repeated import is idempotent", async 
   assert.equal(fake.writes, 1);
 });
 
+test("tag-only manual labels survive an automated import and update search projections", async () => {
+  const source: SourceBatch = {
+    schemaVersion: 1,
+    batchId: "tr_custom_import",
+    createdAt: "2026-09-01T00:00:00.000Z",
+    targetLanguages: ["en"],
+    items: [{
+      documentId: "topic-custom-import",
+      contentVersion: 1,
+      sourceLanguage: "ja",
+      targetLanguages: ["en"],
+      context: {},
+      content: {
+        title: "恋人Tier",
+        customTags: [{tagId: "tag_ideal", sourceText: "理想"}],
+      },
+    }],
+  };
+  const translated: TranslatedBatch = {
+    schemaVersion: 1,
+    batchId: source.batchId,
+    items: [{
+      documentId: "topic-custom-import",
+      sourceContentVersion: 1,
+      translations: {
+        en: {
+          status: "completed",
+          title: "Partner Tier List",
+          customTags: [{
+            tagId: "tag_ideal",
+            sourceText: "理想",
+            translation: "ideal",
+            status: "translated",
+          }],
+          reviewRequired: false,
+        },
+      },
+    }],
+  };
+  const topics = {
+    "topic-custom-import": {
+      isPublic: true,
+      moderationStatus: "approved",
+      sourceLanguage: "ja",
+      title: "恋人Tier",
+      contentVersion: 1,
+      translationStatus: "processing",
+      translationBatchId: source.batchId,
+      customTags: [{
+        id: "tag_ideal",
+        type: "custom",
+        sourceText: "理想",
+        sourceLocale: "ja",
+        normalizedSourceText: "理想",
+        translations: {en: {text: "Ideal partner", status: "manual"}},
+      }],
+    },
+  };
+  const fake = fakeFirestore(topics);
+  const report = await importTranslatedBatch(fake.firestore, source, translated, false);
+  assert.deepEqual(report.updated, [{documentId: "topic-custom-import", status: "partial"}]);
+  const stored = topics["topic-custom-import"] as Record<string, unknown>;
+  const tag = (stored.customTags as Array<Record<string, unknown>>)[0];
+  const english = (tag.translations as Record<string, Record<string, unknown>>).en;
+  assert.equal(english.status, "manual");
+  assert.equal(english.text, "Ideal partner");
+  assert.ok((stored.searchTags as string[]).includes("Ideal partner"));
+});
+
 test("import rejects a changed source version and protects manual translations", async () => {
   const source: SourceBatch = {
     schemaVersion: 1,
@@ -348,4 +501,59 @@ test("import rejects a changed source version and protects manual translations",
   assert.deepEqual(report.skippedManual, [{documentId: "manual", language: "en"}]);
   const manual = (topics.manual.translations as Record<string, Record<string, unknown>>).en;
   assert.equal(manual.title, "Human translation");
+});
+
+test("a Firestore batch mismatch is reported without aborting other items", async () => {
+  const targets = ["en", "ko", "zh-TW", "pt-BR"] as const;
+  const source: SourceBatch = {
+    schemaVersion: 1,
+    batchId: "tr_expected",
+    createdAt: "2026-08-30T00:00:00.000Z",
+    targetLanguages: [...targets],
+    items: ["mismatch", "valid"].map((documentId) => ({
+      documentId,
+      contentVersion: 1,
+      sourceLanguage: "ja",
+      targetLanguages: [...targets],
+      context: {},
+      content: {title: documentId},
+    })),
+  };
+  const translated: TranslatedBatch = {
+    schemaVersion: 1,
+    batchId: source.batchId,
+    items: source.items.map((item) => ({
+      documentId: item.documentId,
+      sourceContentVersion: 1,
+      translations: Object.fromEntries(targets.map((language) => [language, {
+        status: "completed",
+        title: `${item.documentId}-${language}`,
+        reviewRequired: false,
+      }])),
+    })),
+  };
+  const topics = {
+    mismatch: {
+      isPublic: true,
+      moderationStatus: "approved",
+      sourceLanguage: "ja",
+      contentVersion: 1,
+      translationStatus: "processing",
+      translationBatchId: "tr_another_worker",
+    },
+    valid: {
+      isPublic: true,
+      moderationStatus: "approved",
+      sourceLanguage: "ja",
+      contentVersion: 1,
+      translationStatus: "processing",
+      translationBatchId: source.batchId,
+    },
+  };
+  const fake = fakeFirestore(topics);
+  const report = await importTranslatedBatch(fake.firestore, source, translated, false);
+
+  assert.deepEqual(report.batchMismatches, ["mismatch"]);
+  assert.deepEqual(report.updated, [{documentId: "valid", status: "completed"}]);
+  assert.equal(fake.writes, 1);
 });

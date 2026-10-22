@@ -105,6 +105,7 @@ const sourceStrings = (content: SourceContent): string[] => [
   content.title,
   content.description,
   content.category,
+  ...(content.customTags ?? []).map((tag) => tag.sourceText),
   ...(content.tags ?? []),
   ...Object.values(content.itemNames ?? {}),
 ].filter((value): value is string => typeof value === "string");
@@ -219,6 +220,15 @@ export const prepareBatchWithDictionaryAndCache = (
     const cachedTranslations: Partial<Record<TranslationLanguage, TranslatedLocale>> = {};
     const codexTargetLanguages: TranslationLanguage[] = [];
     for (const targetLanguage of item.targetLanguages) {
+      // Free-input tags must be translated together with the Tier title,
+      // description and surrounding tags. An exact cache keyed by a tag in
+      // isolation would discard that context, so these locales always go to
+      // the structured translation step.
+      if ((item.content.customTags?.length ?? 0) > 0) {
+        codexTargetLanguages.push(targetLanguage);
+        codexTranslations += 1;
+        continue;
+      }
       const values = new Map<string, string>();
       let complete = true;
       for (const field of sourceFields(item.content)) {

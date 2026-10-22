@@ -162,6 +162,25 @@ test("first run is a cache miss and second identical run is a cache hit", () => 
   assert.equal(second.cached.items[0].translations.en?.cacheHit, true);
 });
 
+test("free-input tags bypass the isolated exact cache so they keep Tier context", () => {
+  const source = sourceBatch();
+  source.items[0].content = {
+    ...source.items[0].content,
+    tags: undefined,
+    customTags: [{tagId: "tag_ideal", sourceText: "理想"}],
+  };
+  const cache = emptyTranslationCache();
+  const first = prepareBatchWithDictionaryAndCache(source, dictionaries, cache);
+  assert.equal(first.cacheHits, 0);
+  assert.deepEqual(first.source.items[0].codexTargetLanguages, ["en", "ko"]);
+
+  // A populated unrelated cache must not change that decision: custom tags
+  // are translated as part of the document-level structured result.
+  const second = prepareBatchWithDictionaryAndCache(source, dictionaries, cache);
+  assert.equal(second.cacheHits, 0);
+  assert.deepEqual(second.source.items[0].codexTargetLanguages, ["en", "ko"]);
+});
+
 test("invalid cache and changed versions are not reused", () => {
   const cache = emptyTranslationCache();
   const prepared = prepareBatchWithDictionaryAndCache(sourceBatch(), dictionaries, cache);

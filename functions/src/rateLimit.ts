@@ -4,20 +4,23 @@ import {HttpsError} from "firebase-functions/v2/https";
 export type RateLimitAction =
   | "create"
   | "publish"
-  | "imageSearch";
+  | "imageSearch"
+  | "contributeImage";
 
 export interface RateLimitTier {
   create: number;
   publish: number;
   imageSearch: number;
+  contributeImage: number;
 }
 
 export const defaultRateLimits: {anonymous: RateLimitTier; authenticated: RateLimitTier} = {
-  anonymous: {create: 3, publish: 10, imageSearch: 30},
+  anonymous: {create: 3, publish: 10, imageSearch: 30, contributeImage: 0},
   authenticated: {
     create: 15,
     publish: 60,
     imageSearch: 150,
+    contributeImage: 20,
   },
 };
 

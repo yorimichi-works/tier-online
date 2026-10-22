@@ -1,5 +1,6 @@
 import {createHash} from "node:crypto";
 
+import {customTagsFromUnknown, customTagsNeedTranslation} from "../customTags";
 import {firestoreLanguage} from "../internationalization";
 
 export const TRANSLATION_LANGUAGES = [
@@ -21,6 +22,9 @@ export type SourceContent = {
   title: string;
   description?: string;
   category?: string;
+  /** Structured, context-sensitive free-input tags. Never merge by translation. */
+  customTags?: Array<{tagId: string; sourceText: string}>;
+  /** Legacy/static tags retained for pre-custom-tag content and presets. */
   tags?: string[];
   itemNames?: Record<string, string>;
 };
@@ -32,6 +36,7 @@ export type SourceBatchItem = {
   targetLanguages: TranslationLanguage[];
   context: {
     categoryId?: string;
+    tagTranslationInstructions?: string;
   };
   content: SourceContent;
 };
@@ -49,6 +54,13 @@ export type TranslatedLocale = {
   title?: string;
   description?: string;
   category?: string;
+  customTags?: Array<{
+    tagId: string;
+    sourceText: string;
+    translation: string | null;
+    status: "translated" | "ambiguous" | "failed";
+    confidence?: number;
+  }>;
   tags?: string[];
   itemNames?: Record<string, string>;
   reviewRequired: boolean;
@@ -91,7 +103,9 @@ const asRecord = (value: unknown): Record<string, unknown> | null =>
 export const sourceLanguageOf = (
   data: Record<string, unknown>,
 ): TranslationLanguage => {
-  const code = firestoreLanguage(data.sourceLanguage ?? data.contentLanguage);
+  const code = firestoreLanguage(
+    data.sourceLocale ?? data.sourceLanguage ?? data.contentLanguage,
+  );
   return (TRANSLATION_LANGUAGES as readonly string[]).includes(code) ?
     code as TranslationLanguage : "ja";
 };
@@ -125,6 +139,11 @@ export const targetLanguagesFor = (
     if (language === sourceLanguage) return false;
     const current = translations[language];
     if (current?.translationMode === "manual") return false;
+    const needsCustomTags = customTagsNeedTranslation(
+      customTagsFromUnknown(data.customTags),
+      language,
+    );
+    if (needsCustomTags && current?.status !== "processing") return true;
     if (
       current?.sourceContentVersion === version &&
       (current.status === "completed" || current.status === "review_required")
@@ -136,7 +155,8 @@ export const targetLanguagesFor = (
 export const isTranslationCandidate = (
   data: Record<string, unknown>,
 ): boolean => data.isPublic !== false &&
-  data.moderationStatus === "approved" &&
+  // moderationStatus未設定(モデレーション導入前からあるTier)はapproved扱い。
+  (data.moderationStatus == null || data.moderationStatus === "approved") &&
   data.translationStatus !== "processing" &&
   targetLanguagesFor(data).length > 0;
 
@@ -153,6 +173,8 @@ export const buildSourceContent = (
   const title = normalizedText(topic.title) ?? "";
   const description = normalizedText(topic.description);
   const category = normalizedText(topic.category);
+  const customTags = customTagsFromUnknown(topic.customTags)
+    .map((tag) => ({tagId: tag.id, sourceText: tag.sourceText}));
   const tags = Array.isArray(topic.tags) ? topic.tags
     .map(normalizedText)
     .filter((value): value is string => value !== undefined) : [];
@@ -163,7 +185,10 @@ export const buildSourceContent = (
     title,
     ...(description ? {description} : {}),
     ...(category ? {category} : {}),
-    ...(tags.length > 0 ? {tags} : {}),
+    ...(customTags.length > 0 ? {customTags} : {}),
+    // New custom tags are translated as structured values with the entire
+    // Tier as context. Do not also expose them as the old positional array.
+    ...(customTags.length === 0 && tags.length > 0 ? {tags} : {}),
     ...(Object.keys(itemNames).length > 0 ? {itemNames} : {}),
   };
 };
@@ -211,6 +236,24 @@ export const pendingTranslationsAfterStaleBatch = (
     value?.status === "processing" && value.batchId === batchId ?
       {...value, status: "pending"} : value,
   ]));
+};
+
+export const translationStatusesForTopic = (
+  data: Record<string, unknown>,
+  translations = translationsOf(data),
+): LocaleTranslationStatus[] => {
+  const sourceLanguage = sourceLanguageOf(data);
+  const currentVersion = contentVersionOf(data);
+  return TRANSLATION_LANGUAGES
+    .filter((language) => language !== sourceLanguage)
+    .map((language) => {
+      const translation = translations[language];
+      if (translation?.translationMode === "manual") {
+        return translation.status ?? "completed";
+      }
+      if (translation?.sourceContentVersion !== currentVersion) return "pending";
+      return translation?.status ?? "pending";
+    });
 };
 
 const allowedKeys = (
@@ -306,7 +349,7 @@ export const validateTranslatedBatch = (
       }
       translationCount += 1;
       allowedKeys(translation, [
-        "status", "title", "description", "category", "tags", "itemNames",
+        "status", "title", "description", "category", "customTags", "tags", "itemNames",
         "reviewRequired", "translationErrorCode",
         "cacheHit",
       ], translationPath, errors);
@@ -335,6 +378,47 @@ export const validateTranslatedBatch = (
       }
       if (sourceItem.content.category !== undefined) {
         validString(translation.category, `${translationPath}.category`, 200, errors);
+      }
+      if (sourceItem.content.customTags !== undefined) {
+        if (!Array.isArray(translation.customTags) ||
+            translation.customTags.length !== sourceItem.content.customTags.length) {
+          errors.push(`${translationPath}.customTags: matching tag array required`);
+        } else {
+          const expected = new Map(sourceItem.content.customTags.map((tag) => [tag.tagId, tag]));
+          const seenTagIds = new Set<string>();
+          for (const [tagIndex, rawTag] of translation.customTags.entries()) {
+            const tagPath = `${translationPath}.customTags[${tagIndex}]`;
+            const tag = asRecord(rawTag);
+            if (!tag) {
+              errors.push(`${tagPath}: object required`);
+              continue;
+            }
+            allowedKeys(tag, ["tagId", "sourceText", "translation", "status", "confidence"], tagPath, errors);
+            if (typeof tag.tagId !== "string" || !expected.has(tag.tagId)) {
+              errors.push(`${tagPath}.tagId: must match a source custom tag`);
+              continue;
+            }
+            if (seenTagIds.has(tag.tagId)) errors.push(`${tagPath}.tagId: duplicate`);
+            seenTagIds.add(tag.tagId);
+            if (tag.sourceText !== expected.get(tag.tagId)?.sourceText) {
+              errors.push(`${tagPath}.sourceText: must match the source tag`);
+            }
+            if (!["translated", "ambiguous", "failed"].includes(String(tag.status))) {
+              errors.push(`${tagPath}.status: unsupported status`);
+            } else if (tag.status === "translated") {
+              validString(tag.translation, `${tagPath}.translation`, 100, errors);
+            } else if (tag.translation !== null && tag.translation !== undefined) {
+              errors.push(`${tagPath}.translation: null required for ${tag.status}`);
+            }
+            if (tag.confidence !== undefined &&
+                (typeof tag.confidence !== "number" || tag.confidence < 0 || tag.confidence > 1)) {
+              errors.push(`${tagPath}.confidence: number from 0 to 1 required`);
+            }
+          }
+          if (seenTagIds.size !== expected.size) {
+            errors.push(`${translationPath}.customTags: every source tag is required`);
+          }
+        }
       }
       if (sourceItem.content.tags !== undefined) {
         if (!Array.isArray(translation.tags) ||
@@ -384,5 +468,8 @@ export const aggregateTranslationStatus = (
   }
   if (statuses.includes("completed")) return "partial";
   if (statuses.includes("processing")) return "processing";
+  // A permanent failure must stay observable even if other locales are still
+  // queued. targetLanguagesFor() will continue to make both retryable.
+  if (statuses.includes("failed")) return "failed";
   return "pending";
 };
