@@ -52,8 +52,8 @@
 
 ## ローカル検証
 
-以下は初回コミット `a22cc3d` の検証記録。追補の最新結果（Firestore/削除 75 件、
-Functions 33 件、対象 Flutter 38 件）と基点でも再現する画面テストの失敗は、
+以下は初回コミット `a22cc3d` の検証記録。追補の最新結果（Firestore/削除 76 件、
+Functions 33 件、対象 Flutter 42 件）と基点でも再現する画面テストの失敗は、
 [v2 手順書の検証結果](talk_rollout_v2.md#検証結果) に記載した。
 
 Node 24.19.0 / Java 21 / Firestore emulator 1.22.0 を使用。

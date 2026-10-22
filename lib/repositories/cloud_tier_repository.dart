@@ -6,6 +6,14 @@ class TalkReactionResult {
   final Map<String, String> ownVotes;
 }
 
+class TalkReplyTargetUnavailable implements Exception {
+  const TalkReplyTargetUnavailable(this.postId);
+  final String postId;
+  @override
+  String toString() =>
+      'The reply target is unavailable; the draft is kept locally.';
+}
+
 abstract interface class CloudTierRepository {
   String get currentUserId;
   Future<List<TierTopic>> loadTopics();

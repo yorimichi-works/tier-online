@@ -476,21 +476,34 @@ class FirebaseTierRepository implements CloudTierRepository {
   }) async {
     final uid = currentUserId;
     await _requireTalkWrite(uid);
-    await _topics
-        .doc(topicId)
-        .collection('talks')
-        .doc(postId)
-        .collection('replies')
-        .doc(reply.id)
-        .set({
-          ...TierSerialization.replyToJson(reply),
-          'authorUserId': uid,
-          ...TalkClientVersion.fields,
-          'parentReplyId': parentReplyId,
-          'replies': <Object?>[],
-          'upvotes': 0,
-          'downvotes': 0,
-        });
+    final parent = _topics.doc(topicId).collection('talks').doc(postId);
+    final data = {
+      ...TierSerialization.replyToJson(reply),
+      'authorUserId': uid,
+      ...TalkClientVersion.fields,
+      'parentReplyId': parentReplyId,
+      'replies': <Object?>[],
+      'upvotes': 0,
+      'downvotes': 0,
+    };
+    try {
+      await parent.collection('replies').doc(reply.id).set(data);
+    } on FirebaseException catch (error) {
+      if (error.code == 'permission-denied' || error.code == 'not-found') {
+        // An absent parent and a non-visible parent may both be denied by
+        // rules. Confirm absence only when a server read is permitted.
+        bool missing = false;
+        try {
+          missing = !(await parent.get(
+            const GetOptions(source: Source.server),
+          )).exists;
+        } on FirebaseException catch (_) {
+          /* Keep the original write error. */
+        }
+        if (missing) throw TalkReplyTargetUnavailable(postId);
+      }
+      rethrow;
+    }
   }
 
   @override

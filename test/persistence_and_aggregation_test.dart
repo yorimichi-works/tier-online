@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:firebase_core/firebase_core.dart';
@@ -15,6 +17,250 @@ import 'package:tier_table_online/services/tier_aggregation_service.dart';
 
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
+
+  test(
+    'a deleted reply target is isolated while other replies, posts and votes proceed',
+    () async {
+      final cloud = _FakeCloudTierRepository()..denyTalkReplies = true;
+      const gone = TalkPost(
+        id: 'gone',
+        author: 'former',
+        body: 'former parent',
+        rank: TierRank.b,
+        minutesAgo: 0,
+      );
+      const healthy = TalkPost(
+        id: 'healthy',
+        author: 'other',
+        body: 'healthy body',
+        rank: TierRank.b,
+        minutesAgo: 0,
+      );
+      cloud.createdTalks.addAll([gone, healthy]);
+      final store = LocalTierStore(), repository = DummyTierRepository();
+      final state = AppState(
+        repository,
+        cloudRepository: cloud,
+        localStore: store,
+      );
+      await state.initialize();
+      final topic = repository.getById('cloud-topic')!;
+      await state.load(topic.id);
+      expect(
+        await state.replyToTalk(
+          topic,
+          postId: 'gone',
+          body: 'keep orphaned draft',
+        ),
+        isFalse,
+      );
+      cloud.denyTalkReplies = false;
+      cloud.createdTalks.removeWhere(
+        (post) => post.id == 'gone',
+      ); // Author account cleanup fixture.
+      expect(
+        await state.replyToTalk(topic, postId: 'healthy', body: 'valid reply'),
+        isTrue,
+      );
+      var pending = (await store.loadPendingTalkReplies(
+        cloud.userId,
+        topic.id,
+      )).single;
+      expect(pending.reply.body, 'keep orphaned draft');
+      expect(pending.requiresManualRetry, isTrue);
+      expect(pending.failureCode, 'parent-unavailable');
+      final attempts = cloud.replyAttempts.where((id) => id == 'gone').length;
+      await state.postTalk(
+        topic.id,
+        body: 'a new post still works',
+        rank: TierRank.a,
+      );
+      await state.reactToTalk(topic, postId: 'healthy', positive: true);
+      expect(
+        cloud.createdTalks.any((post) => post.body == 'a new post still works'),
+        isTrue,
+      );
+      expect(cloud.votes['firebase-user|healthy']?['root'], 'up');
+      expect(cloud.replyAttempts.where((id) => id == 'gone').length, attempts);
+      expect(await state.retryPendingTalkReplies(topic.id), isFalse);
+      pending = (await store.loadPendingTalkReplies(
+        cloud.userId,
+        topic.id,
+      )).single;
+      expect(pending.reply.body, 'keep orphaned draft');
+      expect(pending.requiresManualRetry, isTrue);
+      cloud.createdTalks.add(
+        gone,
+      ); // Explicit local-fixture restoration permits manual retry.
+      expect(await state.retryPendingTalkReplies(topic.id), isTrue);
+      expect(
+        await store.loadPendingTalkReplies(cloud.userId, topic.id),
+        isEmpty,
+      );
+      expect(
+        cloud.createdReplies
+            .where((entry) => entry.reply.body == 'keep orphaned draft')
+            .single
+            .postId,
+        'gone',
+      );
+      state.dispose();
+    },
+  );
+
+  test(
+    'a second reply is durable before an earlier network request finishes, including restart',
+    () async {
+      final hold = Completer<void>();
+      final cloud = _FakeCloudTierRepository()..holdNextReply = hold;
+      cloud.createdTalks.add(
+        const TalkPost(
+          id: 'post',
+          author: 'other',
+          body: 'canonical',
+          rank: TierRank.b,
+          minutesAgo: 0,
+        ),
+      );
+      final store = _ObservedPendingStore(), repository = DummyTierRepository();
+      final state = AppState(
+        repository,
+        cloudRepository: cloud,
+        localStore: store,
+      );
+      await state.initialize();
+      final topic = repository.getById('cloud-topic')!;
+      await state.load(topic.id);
+      unawaited(
+        state.replyToTalk(
+          topic,
+          postId: 'post',
+          body: 'first waiting for network',
+        ),
+      );
+      await cloud.replyStarted.future.timeout(const Duration(seconds: 2));
+      unawaited(
+        state.replyToTalk(
+          topic,
+          postId: 'post',
+          body: 'second must survive exit',
+        ),
+      );
+      await store.secondPersisted.future.timeout(const Duration(seconds: 2));
+      expect(
+        (await store.loadPendingTalkReplies(
+          cloud.userId,
+          topic.id,
+        )).map((entry) => entry.reply.body),
+        ['first waiting for network', 'second must survive exit'],
+      );
+      expect(hold.isCompleted, isFalse);
+      state
+          .dispose(); // Simulate process exit; the old transport never returns.
+      final restarted = AppState(
+        repository,
+        cloudRepository: cloud,
+        localStore: LocalTierStore(),
+      );
+      await restarted.initialize();
+      await restarted.load(topic.id);
+      final shown = restarted.talksFor(topic).single;
+      expect(shown.body, 'canonical');
+      expect(shown.replies.map((reply) => reply.body), [
+        'first waiting for network',
+        'second must survive exit',
+      ]);
+      expect(await restarted.retryPendingTalkReplies(topic.id), isTrue);
+      expect(
+        cloud.createdReplies.map((entry) => entry.reply.id).toSet().length,
+        2,
+      );
+      expect(
+        await store.loadPendingTalkReplies(cloud.userId, topic.id),
+        isEmpty,
+      );
+      restarted.dispose();
+    },
+  );
+
+  test(
+    'acknowledging an earlier write cannot erase a later durable reply',
+    () async {
+      final hold = Completer<void>();
+      final cloud = _FakeCloudTierRepository()..holdNextReply = hold;
+      cloud.createdTalks.add(
+        const TalkPost(
+          id: 'post',
+          author: 'other',
+          body: 'canonical',
+          rank: TierRank.b,
+          minutesAgo: 0,
+        ),
+      );
+      final store = _ObservedPendingStore(), repository = DummyTierRepository();
+      final state = AppState(
+        repository,
+        cloudRepository: cloud,
+        localStore: store,
+      );
+      await state.initialize();
+      final topic = repository.getById('cloud-topic')!;
+      await state.load(topic.id);
+      final first = state.replyToTalk(topic, postId: 'post', body: 'first');
+      await cloud.replyStarted.future.timeout(const Duration(seconds: 2));
+      final second = state.replyToTalk(topic, postId: 'post', body: 'second');
+      await store.secondPersisted.future.timeout(const Duration(seconds: 2));
+      hold.complete();
+      expect(await first, isTrue);
+      expect(await second, isTrue);
+      expect(cloud.createdReplies.map((entry) => entry.reply.body), [
+        'first',
+        'second',
+      ]);
+      expect(
+        await store.loadPendingTalkReplies(cloud.userId, topic.id),
+        isEmpty,
+      );
+      expect(
+        (await store.loadTalks(
+          topic.id,
+        )).single.replies.map((reply) => reply.body),
+        ['first', 'second'],
+      );
+      state.dispose();
+    },
+  );
+
+  test(
+    'local queue mutations preserve concurrent additions and exact-ID acknowledgments',
+    () async {
+      final a = LocalTierStore(), b = LocalTierStore();
+      PendingTalkReply entry(String id) => PendingTalkReply(
+        postId: 'post',
+        reply: TalkReply(
+          id: id,
+          author: 'name',
+          body: id,
+          createdAt: DateTime.utc(2026),
+        ),
+      );
+      await Future.wait([
+        a.addPendingTalkReply('uid', 'topic', entry('a')),
+        b.addPendingTalkReply('uid', 'topic', entry('b')),
+      ]);
+      await Future.wait([
+        a.acknowledgePendingTalkReply('uid', 'topic', 'a'),
+        b.addPendingTalkReply('uid', 'topic', entry('c')),
+      ]);
+      expect(
+        (await a.loadPendingTalkReplies(
+          'uid',
+          'topic',
+        )).map((reply) => reply.reply.id).toSet(),
+        {'b', 'c'},
+      );
+    },
+  );
 
   test(
     'local account cleanup preserves another UID pending replies and recovery backups',
@@ -886,6 +1132,21 @@ void main() {
   });
 }
 
+class _ObservedPendingStore extends LocalTierStore {
+  final secondPersisted = Completer<void>();
+  @override
+  Future<void> savePendingTalkReplies(
+    String uid,
+    String topicId,
+    List<PendingTalkReply> pending,
+  ) async {
+    await super.savePendingTalkReplies(uid, topicId, pending);
+    if (pending.length == 2 && !secondPersisted.isCompleted) {
+      secondPersisted.complete();
+    }
+  }
+}
+
 class _FakeCloudTierRepository implements CloudTierRepository {
   _FakeCloudTierRepository({
     this.preferences,
@@ -902,6 +1163,9 @@ class _FakeCloudTierRepository implements CloudTierRepository {
   final reactionWrites = <({String postId, String? reaction})>[];
   final Map<String, Map<String, String>> votes;
   bool denyTalkReplies = false;
+  Completer<void>? holdNextReply;
+  final replyStarted = Completer<void>();
+  final replyAttempts = <String>[];
   bool denyTalkReactions = false;
   String userId = 'firebase-user';
   bool failDeletion = false;
@@ -1001,6 +1265,13 @@ class _FakeCloudTierRepository implements CloudTierRepository {
     TalkReply reply, {
     String? parentReplyId,
   }) async {
+    replyAttempts.add(postId);
+    final hold = holdNextReply;
+    holdNextReply = null;
+    if (hold != null) {
+      if (!replyStarted.isCompleted) replyStarted.complete();
+      await hold.future;
+    }
     if (denyTalkReplies) {
       throw FirebaseException(
         plugin: 'cloud_firestore',
@@ -1008,8 +1279,9 @@ class _FakeCloudTierRepository implements CloudTierRepository {
         message: 'Password user has not verified their email',
       );
     }
-    createdReplies.add((postId: postId, reply: reply));
     final index = createdTalks.indexWhere((post) => post.id == postId);
+    if (index < 0) throw TalkReplyTargetUnavailable(postId);
+    createdReplies.add((postId: postId, reply: reply));
     if (index >= 0) {
       createdTalks[index] = withTalkActivity(createdTalks[index], [
         {

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:shared_preferences/shared_preferences.dart';
@@ -10,19 +11,35 @@ class PendingTalkReply {
     required this.postId,
     required this.reply,
     this.parentReplyId,
+    this.failureCode,
+    this.requiresManualRetry = false,
   });
   final String postId;
   final TalkReply reply;
   final String? parentReplyId;
+  final String? failureCode;
+  final bool requiresManualRetry;
+  PendingTalkReply withFailure(String code, {required bool manualRetry}) =>
+      PendingTalkReply(
+        postId: postId,
+        reply: reply,
+        parentReplyId: parentReplyId,
+        failureCode: code,
+        requiresManualRetry: manualRetry,
+      );
   Map<String, Object?> toJson() => {
     'postId': postId,
     'parentReplyId': parentReplyId,
     'reply': TierSerialization.replyToJson(reply),
+    'failureCode': failureCode,
+    'requiresManualRetry': requiresManualRetry,
   };
   factory PendingTalkReply.fromJson(Map<String, Object?> data) =>
       PendingTalkReply(
         postId: data['postId']! as String,
         parentReplyId: data['parentReplyId'] as String?,
+        failureCode: data['failureCode'] as String?,
+        requiresManualRetry: data['requiresManualRetry'] == true,
         reply: TierSerialization.replyFromJson(
           (data['reply']! as Map).cast<String, Object?>(),
         ),
@@ -31,6 +48,9 @@ class PendingTalkReply {
 
 class LocalTierStore {
   static const _topicIdsKey = 'localTopicIds.v1';
+  // Serialize only local read/modify/write operations. A pending network call
+  // must never hold this lock or prevent another draft from reaching storage.
+  static final Map<String, Future<void>> _pendingMutations = {};
   String _userPrefix(String kind, String uid) =>
       '$kind.${base64Url.encode(utf8.encode(uid))}.';
 
@@ -94,11 +114,74 @@ class LocalTierStore {
     List<PendingTalkReply> pending,
   ) async {
     final preferences = await SharedPreferences.getInstance();
-    await preferences.setString(
+    final saved = await preferences.setString(
       '${_userPrefix('pendingTalkReplies.v2', uid)}$topicId',
       jsonEncode(pending.map((reply) => reply.toJson()).toList()),
     );
+    if (!saved) {
+      throw StateError('The pending reply could not be saved locally');
+    }
   }
+
+  Future<void> _updatePendingTalkReplies(
+    String uid,
+    String topicId,
+    void Function(List<PendingTalkReply>) update,
+  ) async {
+    final key = '${_userPrefix('pendingTalkReplies.v2', uid)}$topicId';
+    final previous = _pendingMutations[key] ?? Future<void>.value();
+    final result = previous.then((_) async {
+      final pending = await loadPendingTalkReplies(uid, topicId);
+      update(pending);
+      await savePendingTalkReplies(uid, topicId, pending);
+    });
+    final settled = result.catchError((Object _) {});
+    _pendingMutations[key] = settled;
+    unawaited(
+      settled.then((_) {
+        if (identical(_pendingMutations[key], settled)) {
+          _pendingMutations.remove(key);
+        }
+      }),
+    );
+    await result;
+  }
+
+  Future<void> addPendingTalkReply(
+    String uid,
+    String topicId,
+    PendingTalkReply entry,
+  ) => _updatePendingTalkReplies(uid, topicId, (pending) {
+    if (!pending.any((reply) => reply.reply.id == entry.reply.id)) {
+      pending.add(entry);
+    }
+  });
+
+  Future<void> acknowledgePendingTalkReply(
+    String uid,
+    String topicId,
+    String replyId,
+  ) => _updatePendingTalkReplies(
+    uid,
+    topicId,
+    (pending) => pending.removeWhere((reply) => reply.reply.id == replyId),
+  );
+
+  Future<void> recordPendingTalkReplyFailure(
+    String uid,
+    String topicId,
+    String replyId,
+    String code, {
+    required bool manualRetry,
+  }) => _updatePendingTalkReplies(uid, topicId, (pending) {
+    final index = pending.indexWhere((reply) => reply.reply.id == replyId);
+    if (index >= 0) {
+      pending[index] = pending[index].withFailure(
+        code,
+        manualRetry: manualRetry,
+      );
+    }
+  });
 
   Future<List<TierTopic>> loadTopics() async {
     final preferences = await SharedPreferences.getInstance();

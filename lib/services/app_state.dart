@@ -1030,37 +1030,66 @@ class AppState extends ChangeNotifier {
     Future<void> Function(CloudTierRepository cloud) write, {
     String? expectedUid,
     PendingTalkReply? pendingReply,
+    bool retryFailed = false,
   }) async {
     if (_cloudRepository == null || !_cloudTopicIds.contains(topicId)) {
       return true;
     }
     final uid = expectedUid ?? currentDataUserId;
     final key = '$uid|$topicId';
+    // Persist the draft before waiting for the network serialization chain.
+    // This lock covers local storage only; an offline write cannot hold it.
+    if (pendingReply != null) {
+      try {
+        await _localStore.addPendingTalkReply(uid, topicId, pendingReply);
+      } on Object catch (error) {
+        _cloudError = error;
+        notifyListeners();
+        return false;
+      }
+    }
     final previous = _talkWriteChains[key] ?? Future<void>.value();
     final result = previous.then((_) async {
       try {
         final pending = await _localStore.loadPendingTalkReplies(uid, topicId);
-        if (pendingReply != null &&
-            !pending.any((p) => p.reply.id == pendingReply.reply.id)) {
-          pending.add(pendingReply);
-          await _localStore.savePendingTalkReplies(uid, topicId, pending);
-        }
+        Object? pendingFailure;
+        var anyReplyFailed = false;
         if (currentDataUserId != uid) {
           throw StateError('The active account changed');
         }
-        while (pending.isNotEmpty) {
-          final first = pending.first;
+        for (final entry in pending) {
+          if (entry.requiresManualRetry && !retryFailed) continue;
           if (currentDataUserId != uid) {
             throw StateError('The active account changed');
           }
-          await _cloudRepository!.createTalkReply(
-            topicId,
-            first.postId,
-            first.reply,
-            parentReplyId: first.parentReplyId,
-          );
-          pending.removeAt(0);
-          await _localStore.savePendingTalkReplies(uid, topicId, pending);
+          try {
+            await _cloudRepository!.createTalkReply(
+              topicId,
+              entry.postId,
+              entry.reply,
+              parentReplyId: entry.parentReplyId,
+            );
+            // Remove only this acknowledged ID. Replacing an old snapshot
+            // here could erase drafts persisted while the request was pending.
+            await _localStore.acknowledgePendingTalkReply(
+              uid,
+              topicId,
+              entry.reply.id,
+            );
+          } on Object catch (error) {
+            pendingFailure = error;
+            anyReplyFailed = true;
+            await _localStore.recordPendingTalkReplyFailure(
+              uid,
+              topicId,
+              entry.reply.id,
+              error is TalkReplyTargetUnavailable
+                  ? 'parent-unavailable'
+                  : 'write-failed',
+              manualRetry: error is TalkReplyTargetUnavailable,
+            );
+            // Keep the text and continue with other replies/current operation.
+          }
         }
         if (currentDataUserId != uid) {
           throw StateError('The active account changed');
@@ -1085,9 +1114,15 @@ class AppState extends ChangeNotifier {
         await _loadOwnTalkReactions(topicId, uid);
         await _restorePendingTalkReplies(topicId, uid);
         await _localStore.saveTalks(topicId, _localTalks[topicId]!);
-        _cloudError = null;
+        _cloudError = pendingFailure;
         notifyListeners();
-        return true;
+        final stillPending =
+            pendingReply != null &&
+            (await _localStore.loadPendingTalkReplies(
+              uid,
+              topicId,
+            )).any((entry) => entry.reply.id == pendingReply.reply.id);
+        return !stillPending && !(retryFailed && anyReplyFailed);
       } on Object catch (error) {
         _cloudError = error;
         if (currentDataUserId == uid) {
@@ -1106,7 +1141,7 @@ class AppState extends ChangeNotifier {
   }
 
   Future<bool> retryPendingTalkReplies(String topicId) =>
-      _syncTalkWrite(topicId, (_) async {});
+      _syncTalkWrite(topicId, (_) async {}, retryFailed: true);
 
   Future<void> _restorePendingTalkReplies(String topicId, String uid) async {
     final pending = await _localStore.loadPendingTalkReplies(uid, topicId);

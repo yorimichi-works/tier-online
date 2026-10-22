@@ -314,3 +314,14 @@ test('a stale full-parent batch cannot smuggle body/reply/counter changes; the b
   assert.deepEqual(after.fields, before.fields);
   assert.equal((await request('GET', path('public', '/replies/batch-reply'), null, 'seed')).status, 404);
 });
+
+test('a parent deleted by trusted cleanup denies its reply without blocking another thread', async () => {
+  const deleted = 'topics/public/talks/deleted-while-pending';
+  await allowed(request('PATCH', deleted, post('alice', { id: 'deleted-while-pending' }), 'seed'));
+  await allowed(request('DELETE', deleted, null, 'seed'));
+  await denied(request('PATCH', `${deleted}/replies/held-reply`, reply('held-reply', 'bob'), other));
+  await allowed(request('PATCH', path('public', '/replies/unrelated-after-delete'),
+    reply('unrelated-after-delete', 'bob'), other));
+  await allowed(request('PATCH', path('public', '/reactions/bob'),
+    { userId: 'bob', votes: { root: 'up' } }, other));
+});
