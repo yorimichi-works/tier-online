@@ -48,6 +48,11 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    match /clientPolicies/{policyId} {
+      allow read: if policyId == 'talks';
+      allow write: if false;
+    }
+
     match /adBonusTokens/{tokenId} {
       allow read, write: if false;
     }
@@ -111,7 +116,25 @@ service cloud.firestore {
 
       match /talks/{talkId} {
         function canParticipate() {
-          return signedIn() && canViewTopic(topicId) && emailVerifiedOrExempt();
+          return signedIn() && canViewTopic(topicId) && emailVerifiedOrExempt() &&
+            talkWritesEnabled();
+        }
+
+        function talkWritesEnabled() {
+          let policy = get(/databases/$(database)/documents/clientPolicies/talks).data;
+          return exists(/databases/$(database)/documents/clientPolicies/talks) &&
+            policy.get('writesEnabled', false) == true &&
+            policy.get('readProtocolVersion', 0) == 2 &&
+            policy.get('minProtocolVersion', 0) == 2 &&
+            policy.get('minClientBuild', 0) is int &&
+            policy.get('minClientBuild', 0) >= 2;
+        }
+
+        function compatibleTalkClient() {
+          let policy = get(/databases/$(database)/documents/clientPolicies/talks).data;
+          return request.resource.data.get('clientProtocolVersion', 0) == 2 &&
+            request.resource.data.get('clientBuild', 0) is int &&
+            request.resource.data.get('clientBuild', 0) >= policy.minClientBuild;
         }
 
         function ownContent() {
@@ -132,10 +155,11 @@ service cloud.firestore {
         }
 
         allow read: if canViewTopic(topicId);
-        allow create: if canParticipate() &&
+        allow create: if canParticipate() && compatibleTalkClient() &&
           request.resource.data.keys().hasOnly([
             'id', 'author', 'body', 'rank', 'minutesAgo', 'createdAt',
-            'authorUserId', 'attachedTier', 'replies', 'upvotes', 'downvotes'
+            'authorUserId', 'attachedTier', 'replies', 'upvotes', 'downvotes',
+            'clientProtocolVersion', 'clientBuild'
           ]) &&
           request.resource.data.get('id', '') == talkId &&
           request.resource.data.get('authorUserId', '') == request.auth.uid &&
@@ -148,19 +172,22 @@ service cloud.firestore {
            serializedDate(request.resource.data.createdAt)) &&
           emptyActivity(request.resource.data);
         // Freeze identity, embedded legacy replies and historical counters.
-        allow update: if canParticipate() && ownContent() &&
+        allow update: if canParticipate() && compatibleTalkClient() && ownContent() &&
           request.resource.data.body is string &&
-          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['body']);
-        allow delete: if ownsTopic(topicId);
+          request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['body', 'clientProtocolVersion', 'clientBuild']);
+        // Only trusted recursive cleanup may remove a thread with children.
+        allow delete: if false;
 
         match /replies/{replyId} {
           allow read: if canViewTopic(topicId) &&
             exists(/databases/$(database)/documents/topics/$(topicId)/talks/$(talkId));
-          allow create: if canParticipate() &&
+          allow create: if canParticipate() && compatibleTalkClient() &&
             exists(/databases/$(database)/documents/topics/$(topicId)/talks/$(talkId)) &&
             request.resource.data.keys().hasOnly([
               'id', 'author', 'body', 'createdAt', 'stance', 'authorUserId',
-              'parentReplyId', 'replies', 'upvotes', 'downvotes'
+              'parentReplyId', 'replies', 'upvotes', 'downvotes',
+              'clientProtocolVersion', 'clientBuild'
             ]) &&
             replyId != 'root' && request.resource.data.get('id', '') == replyId &&
             request.resource.data.get('authorUserId', '') == request.auth.uid &&
@@ -171,11 +198,12 @@ service cloud.firestore {
             (request.resource.data.get('parentReplyId', null) == null ||
              request.resource.data.parentReplyId is string) &&
             emptyActivity(request.resource.data);
-          allow update: if canParticipate() && ownContent() &&
+          allow update: if canParticipate() && compatibleTalkClient() && ownContent() &&
             exists(/databases/$(database)/documents/topics/$(topicId)/talks/$(talkId)) &&
             request.resource.data.body is string &&
-            request.resource.data.diff(resource.data).affectedKeys().hasOnly(['body']);
-          allow delete: if ownsTopic(topicId);
+            request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['body', 'clientProtocolVersion', 'clientBuild']);
+          allow delete: if false;
         }
 
         // One document per UID; votes maps root/reply IDs to up/down. A user
@@ -184,9 +212,9 @@ service cloud.firestore {
         match /reactions/{userId} {
           allow read: if canViewTopic(topicId) &&
             exists(/databases/$(database)/documents/topics/$(topicId)/talks/$(talkId));
-          allow create, update: if canParticipate() && request.auth.uid == userId &&
+          allow create, update: if canParticipate() && compatibleTalkClient() && request.auth.uid == userId &&
             exists(/databases/$(database)/documents/topics/$(topicId)/talks/$(talkId)) &&
-            request.resource.data.keys().hasOnly(['userId', 'votes']) &&
+            request.resource.data.keys().hasOnly(['userId', 'votes', 'clientProtocolVersion', 'clientBuild']) &&
             request.resource.data.get('userId', '') == userId &&
             request.resource.data.get('votes', null) is map &&
             request.resource.data.votes.size() <= 1000 &&

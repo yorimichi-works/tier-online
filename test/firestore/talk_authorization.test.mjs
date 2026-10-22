@@ -35,7 +35,11 @@ function value(data) {
   return { mapValue: { fields: fields(data) } };
 }
 const fields = (data) => Object.fromEntries(Object.entries(data).map(([k, v]) => [k, value(v)]));
-async function request(method, path, data, actor, mask) {
+async function request(method, path, data, actor, mask, legacyClient = false) {
+  if (method === 'PATCH' && actor !== 'seed' && path.startsWith('topics/') && !legacyClient) {
+    data = { ...data, clientProtocolVersion: 2, clientBuild: 2 };
+    if (mask) mask = [...mask, 'clientProtocolVersion', 'clientBuild'];
+  }
   const params = new URLSearchParams();
   for (const key of mask || []) params.append('updateMask.fieldPaths', key);
   const token = actor === 'seed' ? 'owner' : actor ? mockToken(actor) : null;
@@ -70,6 +74,9 @@ const path = (topic, tail = '') => `topics/${topic}/talks/post${tail}`;
 before(async () => {
   // Never clear/import an existing emulator database. This runner starts a
   // separate ephemeral process and seeds only its fixed demo project.
+  await allowed(request('PATCH', 'clientPolicies/talks', {
+    writesEnabled: true, readProtocolVersion: 2, minProtocolVersion: 2, minClientBuild: 2,
+  }, 'seed'));
   for (const topic of ['public', 'private']) {
     await allowed(request('PATCH', `topics/${topic}`, {
       creatorId: 'alice', isPublic: topic === 'public',
@@ -87,6 +94,62 @@ before(async () => {
     delete legacy.replies[0].authorUserId;
     await allowed(request('PATCH', `topics/${topic}/talks/legacy`, legacy, 'seed'));
   }
+});
+
+test('legacy whole-document clients are gated while v2 can edit a UID-owned legacy body', async () => {
+  const legacy = post('alice', { id: 'compat-legacy', upvotes: 7,
+    replies: [reply('old-reply', 'bob')] });
+  const target = 'topics/public/talks/compat-legacy';
+  await allowed(request('PATCH', target, legacy, 'seed'));
+  await denied(request('PATCH', target, { ...legacy, body: 'old whole replacement' }, owner, undefined, true));
+  await allowed(request('PATCH', target, { body: 'v2 author edit' }, owner, ['body']));
+  const saved = await allowed(request('GET', target, null, owner));
+  assert.equal(saved.fields.upvotes.integerValue, '7');
+  assert.equal(saved.fields.replies.arrayValue.values.length, 1);
+  assert.equal(saved.fields.authorUserId.stringValue, 'alice');
+  await denied(request('DELETE', target, null, owner));
+  await denied(request('DELETE', path('public', '/replies/existing'), null, owner));
+});
+
+test('the compatibility policy is readable but never client writable', async () => {
+  for (const actor of Object.values(actors)) {
+    await allowed(request('GET', 'clientPolicies/talks', null, actor));
+    await denied(request('PATCH', 'clientPolicies/talks', { writesEnabled: true }, actor));
+    await denied(request('DELETE', 'clientPolicies/talks', null, actor));
+  }
+});
+
+test('pausing or raising the required build blocks writes while old and new activity stay readable', async () => {
+  const target = 'topics/public/talks/rollout';
+  await allowed(request('PATCH', target, post('alice', { id: 'rollout', upvotes: 7,
+    replies: [reply('embedded', 'bob')] }), 'seed'));
+  await allowed(request('PATCH', `${target}/replies/separate`, reply('separate', 'bob'), other));
+  for (const policy of [
+    { writesEnabled: false, readProtocolVersion: 2, minProtocolVersion: 2, minClientBuild: 2 },
+    { writesEnabled: true, readProtocolVersion: 2, minProtocolVersion: 2, minClientBuild: 3 },
+    { writesEnabled: true, readProtocolVersion: 2, minProtocolVersion: 3, minClientBuild: 2 },
+  ]) {
+    await allowed(request('PATCH', 'clientPolicies/talks', policy, 'seed'));
+    await denied(request('PATCH', `${target}/replies/blocked`, reply('blocked', 'bob'), other));
+    await denied(request('PATCH', `${target}/reactions/bob`, { userId: 'bob', votes: { root: 'up' } }, other));
+    const saved = await allowed(request('GET', target, null, null));
+    assert.equal(saved.fields.upvotes.integerValue, '7');
+    assert.equal(saved.fields.replies.arrayValue.values.length, 1);
+    await allowed(request('GET', `${target}/replies/separate`, null, null));
+  }
+  await allowed(request('PATCH', 'clientPolicies/talks', {
+    writesEnabled: true, readProtocolVersion: 2, minProtocolVersion: 2, minClientBuild: 2,
+  }, 'seed'));
+});
+
+test('a missing or malformed rollout policy fails closed', async () => {
+  await allowed(request('DELETE', 'clientPolicies/talks', null, 'seed'));
+  await denied(request('PATCH', path('public', '/reactions/bob'), { userId: 'bob', votes: { root: 'up' } }, other));
+  await allowed(request('PATCH', 'clientPolicies/talks', { writesEnabled: true }, 'seed'));
+  await denied(request('PATCH', path('public', '/reactions/bob'), { userId: 'bob', votes: { root: 'up' } }, other));
+  await allowed(request('PATCH', 'clientPolicies/talks', {
+    writesEnabled: true, readProtocolVersion: 2, minProtocolVersion: 2, minClientBuild: 2,
+  }, 'seed'));
 });
 
 for (const topic of ['public', 'private']) {

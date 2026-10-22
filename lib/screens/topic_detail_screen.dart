@@ -116,13 +116,26 @@ class _TopicDetailScreenState extends State<TopicDetailScreen> {
     controller: _talkController,
     onReply: (post, parentReplyId, body, stance) async {
       if (post.id == null) return;
-      await widget.appState.replyToTalk(
+      final sent = await widget.appState.replyToTalk(
         widget.topic,
         postId: post.id!,
         parentReplyId: parentReplyId,
         body: body,
         stance: stance,
       );
+      if (!sent && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(context.l10n.t('syncRetry')),
+            action: SnackBarAction(
+              label: context.l10n.t('retry'),
+              onPressed: () {
+                widget.appState.retryPendingTalkReplies(widget.topic.id);
+              },
+            ),
+          ),
+        );
+      }
     },
     onReact: (post, replyId, positive) async {
       if (post.id == null) return;

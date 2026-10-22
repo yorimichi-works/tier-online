@@ -1,5 +1,8 @@
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:tier_table_online/domain/talk_reactions.dart';
+import 'package:tier_table_online/domain/talk_activity.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:tier_table_online/l10n/app_localizations.dart';
 import 'package:tier_table_online/models/tier_models.dart';
@@ -12,6 +15,330 @@ import 'package:tier_table_online/services/tier_aggregation_service.dart';
 
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
+
+  test(
+    'local account cleanup preserves another UID pending replies and recovery backups',
+    () async {
+      final store = LocalTierStore();
+      const post = TalkPost(
+        id: 'post',
+        author: 'name',
+        body: 'body',
+        rank: TierRank.b,
+        minutesAgo: 0,
+      );
+      for (final uid in ['target', 'target.other']) {
+        await store.savePendingTalkReplies(uid, 'topic', [
+          PendingTalkReply(
+            postId: 'post',
+            reply: TalkReply(
+              id: uid,
+              author: 'name',
+              body: 'draft $uid',
+              createdAt: DateTime.utc(2026),
+            ),
+          ),
+        ]);
+        await store.backupLegacyTalks(uid, 'topic', [post]);
+      }
+      await store.clearUserData(uid: 'target');
+      expect(await store.loadPendingTalkReplies('target', 'topic'), isEmpty);
+      expect(await store.loadLegacyTalkBackup('target', 'topic'), isEmpty);
+      expect(
+        (await store.loadPendingTalkReplies(
+          'target.other',
+          'topic',
+        )).single.reply.body,
+        'draft target.other',
+      );
+      expect(
+        (await store.loadLegacyTalkBackup('target.other', 'topic')).single.body,
+        'body',
+      );
+    },
+  );
+
+  test(
+    'switching accounts never sends the previous UID pending reply',
+    () async {
+      final cloud = _FakeCloudTierRepository()..denyTalkReplies = true;
+      cloud.createdTalks.add(
+        const TalkPost(
+          id: 'post',
+          author: 'name',
+          body: 'body',
+          rank: TierRank.b,
+          minutesAgo: 0,
+        ),
+      );
+      final repository = DummyTierRepository(), store = LocalTierStore();
+      final state = AppState(repository, cloudRepository: cloud);
+      await state.initialize();
+      final topic = repository.getById('cloud-topic')!;
+      await state.load(topic.id);
+      expect(
+        await state.replyToTalk(topic, postId: 'post', body: 'UID-bound draft'),
+        isFalse,
+      );
+      cloud.userId = 'second-account';
+      cloud.denyTalkReplies = false;
+      await state.load(topic.id);
+      await state.reactToTalk(topic, postId: 'post', positive: true);
+      expect(cloud.createdReplies, isEmpty);
+      expect(
+        (await store.loadPendingTalkReplies(
+          'firebase-user',
+          topic.id,
+        )).single.reply.body,
+        'UID-bound draft',
+      );
+      cloud.userId = 'firebase-user';
+      await state.load(topic.id);
+      expect(await state.retryPendingTalkReplies(topic.id), isTrue);
+      expect(cloud.createdReplies.single.reply.body, 'UID-bound draft');
+      expect(cloud.createdReplies.single.reply.authorUserId, 'firebase-user');
+      state.dispose();
+    },
+  );
+
+  test(
+    'pre-upgrade local replies have a permanent backup without guessed ownership or auto-send',
+    () async {
+      final cloud = _FakeCloudTierRepository();
+      const server = TalkPost(
+        id: 'legacy',
+        author: 'name',
+        body: 'original server',
+        rank: TierRank.b,
+        minutesAgo: 0,
+        upvotes: 7,
+      );
+      cloud.createdTalks.add(server);
+      final repository = DummyTierRepository(), store = LocalTierStore();
+      final state = AppState(repository, cloudRepository: cloud);
+      await state.initialize();
+      final topic = repository.getById('cloud-topic')!;
+      await store.saveTalks(topic.id, [
+        server.copyWith(
+          replies: [
+            TalkReply(
+              id: 'unconfirmed-old',
+              author: 'unknown',
+              body: 'old local text',
+              createdAt: DateTime.utc(2026),
+            ),
+          ],
+        ),
+      ]);
+      await state.load(topic.id);
+      await state.reactToTalk(topic, postId: 'legacy', positive: true);
+      final backup = (await store.loadLegacyTalkBackup(
+        cloud.userId,
+        topic.id,
+      )).single;
+      expect(backup.replies.single.body, 'old local text');
+      expect(backup.replies.single.authorUserId, isNull);
+      expect(backup.upvotes, 7);
+      expect(cloud.createdReplies, isEmpty);
+      expect(state.talksFor(topic).single.body, 'original server');
+      state.dispose();
+    },
+  );
+
+  for (final nextOperation in ['reply', 'reaction']) {
+    test(
+      'permission-denied reply survives restart and a later $nextOperation',
+      () async {
+        final cloud = _FakeCloudTierRepository()..denyTalkReplies = true;
+        cloud.createdTalks.add(
+          const TalkPost(
+            id: 'server-post',
+            author: 'other',
+            authorUserId: 'someone-else',
+            body: 'server body',
+            rank: TierRank.b,
+            minutesAgo: 0,
+          ),
+        );
+        final repository = DummyTierRepository();
+        var state = AppState(repository, cloudRepository: cloud);
+        await state.initialize();
+        final topic = repository.getById('cloud-topic')!;
+        await state.load(topic.id);
+        expect(
+          await state.replyToTalk(
+            topic,
+            postId: 'server-post',
+            body: 'keep this failed reply',
+          ),
+          isFalse,
+        );
+        expect(state.cloudError, isA<FirebaseException>());
+        final store = LocalTierStore();
+        expect(
+          (await store.loadPendingTalkReplies(
+            cloud.userId,
+            topic.id,
+          )).single.reply.body,
+          'keep this failed reply',
+        );
+        state.dispose();
+        state = AppState(repository, cloudRepository: cloud);
+        await state.initialize();
+        await state.load(topic.id);
+        expect(
+          state.talksFor(topic).single.replies.single.body,
+          'keep this failed reply',
+        );
+        cloud.denyTalkReplies =
+            false; // Equivalent to email verification succeeding.
+        if (nextOperation == 'reply') {
+          expect(
+            await state.replyToTalk(
+              topic,
+              postId: 'server-post',
+              body: 'second reply',
+            ),
+            isTrue,
+          );
+        } else {
+          await state.reactToTalk(topic, postId: 'server-post', positive: true);
+        }
+        final restored = (await store.loadTalks(topic.id)).single;
+        expect(restored.body, 'server body');
+        expect(restored.authorUserId, 'someone-else');
+        expect(
+          restored.replies
+              .where((r) => r.body == 'keep this failed reply')
+              .length,
+          1,
+        );
+        expect(
+          await store.loadPendingTalkReplies(cloud.userId, topic.id),
+          isEmpty,
+        );
+        state.dispose();
+      },
+    );
+  }
+
+  test(
+    'two devices toggle the latest server vote instead of stale device preferences',
+    () async {
+      final sharedVotes = <String, Map<String, String>>{};
+      final a = _FakeCloudTierRepository(sharedVotes: sharedVotes);
+      final b = _FakeCloudTierRepository(sharedVotes: sharedVotes);
+      const post = TalkPost(
+        id: 'post',
+        author: 'name',
+        body: 'body',
+        rank: TierRank.b,
+        minutesAgo: 0,
+      );
+      a.createdTalks.add(post);
+      b.createdTalks.add(post);
+      final repoA = DummyTierRepository(), repoB = DummyTierRepository();
+      final stateA = AppState(repoA, cloudRepository: a),
+          stateB = AppState(repoB, cloudRepository: b);
+      await stateA.initialize();
+      await stateB.initialize();
+      final topicA = repoA.getById('cloud-topic')!,
+          topicB = repoB.getById('cloud-topic')!;
+      await stateA.load(topicA.id);
+      await stateB.load(topicB.id);
+      await stateA.reactToTalk(topicA, postId: 'post', positive: true);
+      await stateB.reactToTalk(topicB, postId: 'post', positive: false);
+      expect(sharedVotes['firebase-user|post']?['root'], 'down');
+      await stateA.reactToTalk(topicA, postId: 'post', positive: true);
+      expect(sharedVotes['firebase-user|post']?['root'], 'up');
+      expect(a.reactionWrites.last.reaction, 'up');
+      await stateA.reactToTalk(topicA, postId: 'post', positive: true);
+      expect(sharedVotes['firebase-user|post']?['root'], isNull);
+      stateA.dispose();
+      stateB.dispose();
+    },
+  );
+
+  test(
+    'account switches keep votes and pending replies isolated by UID',
+    () async {
+      SharedPreferences.setMockInitialValues({
+        'talkReactions': ['cloud-topic|post|root=up'],
+      });
+      final cloud = _FakeCloudTierRepository();
+      cloud.createdTalks.add(
+        const TalkPost(
+          id: 'post',
+          author: 'name',
+          body: 'body',
+          rank: TierRank.b,
+          minutesAgo: 0,
+        ),
+      );
+      final repository = DummyTierRepository();
+      final state = AppState(repository, cloudRepository: cloud);
+      await state.initialize();
+      final topic = repository.getById('cloud-topic')!;
+      await state.load(topic.id);
+      cloud.denyTalkReplies = true;
+      expect(
+        await state.replyToTalk(
+          topic,
+          postId: 'post',
+          body: 'first account draft',
+        ),
+        isFalse,
+      );
+      cloud.denyTalkReplies = false;
+      await state.reactToTalk(topic, postId: 'post', positive: true);
+      cloud.userId = 'second-account';
+      await state.load(topic.id);
+      await state.reactToTalk(topic, postId: 'post', positive: true);
+      expect(cloud.votes['firebase-user|post']?['root'], 'up');
+      expect(cloud.votes['second-account|post']?['root'], 'up');
+      cloud.userId = 'firebase-user';
+      await state.load(topic.id);
+      await state.reactToTalk(topic, postId: 'post', positive: true);
+      expect(cloud.votes['firebase-user|post']?['root'], isNull);
+      expect(cloud.votes['second-account|post']?['root'], 'up');
+      final preferences = await SharedPreferences.getInstance();
+      expect(
+        preferences.getStringList('talkReactions'),
+        contains('cloud-topic|post|root=up'),
+      );
+      state.dispose();
+    },
+  );
+
+  test(
+    'a rejected reaction never commits its optimistic local choice',
+    () async {
+      final cloud = _FakeCloudTierRepository()..denyTalkReactions = true;
+      cloud.createdTalks.add(
+        const TalkPost(
+          id: 'post',
+          author: 'name',
+          body: 'body',
+          rank: TierRank.b,
+          minutesAgo: 0,
+        ),
+      );
+      final repository = DummyTierRepository();
+      final state = AppState(repository, cloudRepository: cloud);
+      await state.initialize();
+      final topic = repository.getById('cloud-topic')!;
+      await state.load(topic.id);
+      await state.reactToTalk(topic, postId: 'post', positive: true);
+      expect(state.cloudError, isA<FirebaseException>());
+      expect(cloud.votes, isEmpty);
+      final preferences = await SharedPreferences.getInstance();
+      expect(
+        preferences.getStringList('talkReactions'),
+        isNot(contains('firebase-user|cloud-topic|post|root=up')),
+      );
+      state.dispose();
+    },
+  );
 
   test(
     'cloud actions write only a new post, reply, or personal reaction',
@@ -560,7 +887,10 @@ void main() {
 }
 
 class _FakeCloudTierRepository implements CloudTierRepository {
-  _FakeCloudTierRepository({this.preferences});
+  _FakeCloudTierRepository({
+    this.preferences,
+    Map<String, Map<String, String>>? sharedVotes,
+  }) : votes = sharedVotes ?? {};
 
   final ({String preferredLocale, String region})? preferences;
   final submissions = <UserTierSubmission>[];
@@ -570,6 +900,9 @@ class _FakeCloudTierRepository implements CloudTierRepository {
   final createdTalks = <TalkPost>[];
   final createdReplies = <({String postId, TalkReply reply})>[];
   final reactionWrites = <({String postId, String? reaction})>[];
+  final Map<String, Map<String, String>> votes;
+  bool denyTalkReplies = false;
+  bool denyTalkReactions = false;
   String userId = 'firebase-user';
   bool failDeletion = false;
 
@@ -648,8 +981,13 @@ class _FakeCloudTierRepository implements CloudTierRepository {
       List.of(submissions);
 
   @override
-  Future<List<TalkPost>> loadTalks(String topicId) async =>
-      List.of(createdTalks);
+  Future<List<TalkPost>> loadTalks(String topicId) async => [
+    for (final post in createdTalks)
+      withTalkActivity(post, [], [
+        for (final entry in votes.entries)
+          if (entry.key.endsWith('|${post.id}')) {'votes': entry.value},
+      ]),
+  ];
 
   @override
   Future<void> createTalk(String topicId, TalkPost post) async {
@@ -663,17 +1001,57 @@ class _FakeCloudTierRepository implements CloudTierRepository {
     TalkReply reply, {
     String? parentReplyId,
   }) async {
+    if (denyTalkReplies) {
+      throw FirebaseException(
+        plugin: 'cloud_firestore',
+        code: 'permission-denied',
+        message: 'Password user has not verified their email',
+      );
+    }
     createdReplies.add((postId: postId, reply: reply));
+    final index = createdTalks.indexWhere((post) => post.id == postId);
+    if (index >= 0) {
+      createdTalks[index] = withTalkActivity(createdTalks[index], [
+        {
+          ...TierSerialization.replyToJson(reply),
+          'parentReplyId': parentReplyId,
+        },
+      ], []);
+    }
   }
 
   @override
-  Future<void> setTalkReaction(
+  Future<Map<String, String>> loadOwnTalkReactions(String topicId) async => {
+    for (final post in createdTalks)
+      for (final vote in (votes['$userId|${post.id}'] ?? {}).entries)
+        '${post.id}|${vote.key}': vote.value,
+  };
+
+  @override
+  Future<TalkReactionResult> toggleTalkReaction(
     String topicId,
     String postId, {
     String? replyId,
-    required String? reaction,
+    required bool positive,
   }) async {
-    reactionWrites.add((postId: postId, reaction: reaction));
+    if (denyTalkReactions) {
+      throw FirebaseException(
+        plugin: 'cloud_firestore',
+        code: 'permission-denied',
+      );
+    }
+    final key = '$userId|$postId';
+    final result = toggleTalkVote(
+      votes[key] ?? {},
+      replyId ?? 'root',
+      positive,
+    );
+    votes[key] = result.votes;
+    reactionWrites.add((postId: postId, reaction: result.reaction));
+    return TalkReactionResult(
+      reaction: result.reaction,
+      ownVotes: result.votes,
+    );
   }
 
   @override

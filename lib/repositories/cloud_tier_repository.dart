@@ -1,5 +1,11 @@
 import '../models/tier_models.dart';
 
+class TalkReactionResult {
+  const TalkReactionResult({required this.reaction, required this.ownVotes});
+  final String? reaction;
+  final Map<String, String> ownVotes;
+}
+
 abstract interface class CloudTierRepository {
   String get currentUserId;
   Future<List<TierTopic>> loadTopics();
@@ -17,11 +23,12 @@ abstract interface class CloudTierRepository {
     TalkReply reply, {
     String? parentReplyId,
   });
-  Future<void> setTalkReaction(
+  Future<Map<String, String>> loadOwnTalkReactions(String topicId);
+  Future<TalkReactionResult> toggleTalkReaction(
     String topicId,
     String postId, {
     String? replyId,
-    required String? reaction,
+    required bool positive,
   });
   Future<void> reportTalk(
     String topicId, {

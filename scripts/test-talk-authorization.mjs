@@ -9,6 +9,9 @@ const jar = process.env.FIRESTORE_EMULATOR_JAR;
 if (!jar || !existsSync(jar)) {
   throw new Error('Set FIRESTORE_EMULATOR_JAR to a local Firestore emulator JAR (Java 21 required).');
 }
+if (!existsSync(resolve(root, 'functions/lib/accountDeletion.emulator.test.js'))) {
+  throw new Error('Build existing Functions dependencies first: npm --prefix functions run build');
+}
 const port = 8788;
 const emulator = spawn(process.env.JAVA_BIN || 'java', [
   '-jar', jar, '--host', '127.0.0.1', '--port', String(port),
@@ -37,7 +40,7 @@ try {
   if (!ready) throw new Error(`Emulator startup timed out:\n${log}`);
   const child = spawn(process.execPath, ['--test', '--test-concurrency=1',
     ...(process.env.TEST_NAME_PATTERN ? [`--test-name-pattern=${process.env.TEST_NAME_PATTERN}`] : []),
-    'test/firestore/talk_authorization.test.mjs'], {
+    'test/firestore/talk_authorization.test.mjs', 'functions/lib/accountDeletion.emulator.test.js'], {
     cwd: root, stdio: 'inherit', windowsHide: true,
     env: { ...process.env, FIRESTORE_EMULATOR_HOST: `127.0.0.1:${port}` },
   });

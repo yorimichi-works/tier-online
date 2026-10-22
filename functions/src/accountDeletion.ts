@@ -96,7 +96,10 @@ async function deleteTalkData(firestore: Firestore, uid: string): Promise<void> 
       .get(),
   ]);
   const authoredPaths = new Set(authored.docs.map((document) => document.ref.path));
-  await Promise.all(authored.docs.map((document) => document.ref.delete()));
+  // A talk now owns reply/reaction subcollections as well as legacy arrays.
+  // Ordinary delete would leave those children behind and expose them if an
+  // old talk ID was ever reused. Await cleanup before deleting Authentication.
+  await Promise.all(authored.docs.map((document) => firestore.recursiveDelete(document.ref)));
   await Promise.all(containingReplies.docs.map(async (document) => {
     if (authoredPaths.has(document.ref.path)) return;
     const replies = Array.isArray(document.data().replies) ?
@@ -107,6 +110,38 @@ async function deleteTalkData(firestore: Firestore, uid: string): Promise<void> 
       replyAuthorIds: collectReplyAuthorIds(filtered),
     });
   }));
+  await Promise.all([
+    deleteTalkActivityDocuments(firestore, "replies", "authorUserId", uid),
+    deleteTalkActivityDocuments(firestore, "reactions", "userId", uid),
+  ]);
+}
+
+async function deleteTalkActivityDocuments(
+  firestore: Firestore,
+  collection: "replies" | "reactions",
+  ownerField: "authorUserId" | "userId",
+  uid: string,
+): Promise<void> {
+  // Page through even unrelated same-named collections without deleting them
+  // or looping forever on a skipped document. Retry remains idempotent.
+  const query = firestore.collectionGroup(collection).where(ownerField, "==", uid)
+    .orderBy("__name__").limit(400);
+  let cursor: FirebaseFirestore.QueryDocumentSnapshot | undefined;
+  while (true) {
+    const snapshot = await (cursor ? query.startAfter(cursor) : query).get();
+    if (snapshot.empty) return;
+    const batch = firestore.batch();
+    for (const document of snapshot.docs) {
+      const parts = document.ref.path.split("/");
+      if (parts.length === 6 && parts[0] === "topics" &&
+          parts[2] === "talks" && parts[4] === collection) {
+        batch.delete(document.ref);
+      }
+    }
+    await batch.commit();
+    if (snapshot.size < 400) return;
+    cursor = snapshot.docs[snapshot.docs.length - 1];
+  }
 }
 
 export async function deleteAccountData(

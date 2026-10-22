@@ -151,9 +151,11 @@ class AppState extends ChangeNotifier {
   final Map<String, Map<TierRank, List<String>>> _placements = {};
   final Map<String, List<TalkPost>> _localTalks = {};
   final Set<String> _loaded = {};
+  final Map<String, String> _loadedUserIds = {};
   final Set<String> _cloudTopicIds = {};
   final Set<String> _likedTopicIds = {};
   final Map<String, String> _talkReactions = {};
+  final Map<String, Future<void>> _talkWriteChains = {};
   final Set<String> _reportedTalkTargets = {};
   final Set<String> _reportedTopicIds = {};
   String _anonymousId = '';
@@ -620,7 +622,8 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> load(String topicId) async {
-    if (_loaded.contains(topicId)) return;
+    final uid = currentDataUserId;
+    if (_loaded.contains(topicId) && _loadedUserIds[topicId] == uid) return;
     final submission = await _localStore.loadSubmission(topicId);
     if (submission != null) {
       _placements[topicId] = {
@@ -643,6 +646,11 @@ class AppState extends ChangeNotifier {
     _localTalks[topicId] = List.of(await _localStore.loadTalks(topicId));
     if (_cloudRepository != null && _cloudTopicIds.contains(topicId)) {
       try {
+        await _localStore.backupLegacyTalks(
+          uid,
+          topicId,
+          _localTalks[topicId]!,
+        );
         final cloudTalks = await _cloudRepository!.loadTalks(topicId);
         final byId = <String, TalkPost>{
           for (final post in _localTalks[topicId]!)
@@ -654,11 +662,14 @@ class AppState extends ChangeNotifier {
           (post) => post.id == null,
         );
         _localTalks[topicId] = [...withoutId, ...byId.values];
+        await _loadOwnTalkReactions(topicId, uid);
+        await _restorePendingTalkReplies(topicId, uid);
       } on Object catch (error) {
         _cloudError = error;
       }
     }
     _loaded.add(topicId);
+    _loadedUserIds[topicId] = uid;
     notifyListeners();
   }
 
@@ -812,13 +823,14 @@ class AppState extends ChangeNotifier {
     await _syncTalkWrite(topicId, (cloud) => cloud.createTalk(topicId, post));
   }
 
-  Future<void> replyToTalk(
+  Future<bool> replyToTalk(
     TierTopic topic, {
     required String postId,
     required String body,
     ReplyStance? stance,
     String? parentReplyId,
   }) async {
+    final uid = currentDataUserId;
     final local = _localTalks.putIfAbsent(topic.id, () => []);
     var index = local.indexWhere((post) => post.id == postId);
     if (index < 0) {
@@ -829,7 +841,7 @@ class AppState extends ChangeNotifier {
           break;
         }
       }
-      if (seed == null) return;
+      if (seed == null) return false;
       local.add(seed);
       index = local.length - 1;
     }
@@ -849,12 +861,13 @@ class AppState extends ChangeNotifier {
     );
     notifyListeners();
     await _localStore.saveTalks(topic.id, local);
-    await _syncTalkWrite(
+    return _syncTalkWrite(
       topic.id,
-      (cloud) => cloud.createTalkReply(
-        topic.id,
-        postId,
-        reply,
+      (_) async {},
+      expectedUid: uid,
+      pendingReply: PendingTalkReply(
+        postId: postId,
+        reply: reply,
         parentReplyId: parentReplyId,
       ),
     );
@@ -880,6 +893,25 @@ class AppState extends ChangeNotifier {
     required bool positive,
     String? replyId,
   }) async {
+    if (_cloudRepository != null && _cloudTopicIds.contains(topic.id)) {
+      final uid = currentDataUserId;
+      await _syncTalkWrite(topic.id, (cloud) async {
+        final result = await cloud.toggleTalkReaction(
+          topic.id,
+          postId,
+          replyId: replyId,
+          positive: positive,
+        );
+        _talkReactions.removeWhere(
+          (key, _) => key.startsWith('$uid|${topic.id}|$postId|'),
+        );
+        for (final vote in result.ownVotes.entries) {
+          _talkReactions['$uid|${topic.id}|$postId|${vote.key}'] = vote.value;
+        }
+        await _saveTalkReactions();
+      }, expectedUid: uid);
+      return;
+    }
     final local = _localTalks.putIfAbsent(topic.id, () => []);
     var index = local.indexWhere((post) => post.id == postId);
     if (index < 0) {
@@ -934,15 +966,6 @@ class AppState extends ChangeNotifier {
           .toList(),
     );
     await _localStore.saveTalks(topic.id, local);
-    await _syncTalkWrite(
-      topic.id,
-      (cloud) => cloud.setTalkReaction(
-        topic.id,
-        postId,
-        replyId: replyId,
-        reaction: togglingOff ? null : next,
-      ),
-    );
   }
 
   List<TalkReply> _updateReplyReaction(
@@ -1002,33 +1025,131 @@ class AppState extends ChangeNotifier {
     return true;
   }
 
-  Future<void> _syncTalkWrite(
+  Future<bool> _syncTalkWrite(
     String topicId,
-    Future<void> Function(CloudTierRepository cloud) write,
-  ) async {
-    if (_cloudRepository == null || !_cloudTopicIds.contains(topicId)) return;
-    try {
-      await write(_cloudRepository!);
-      final cloudTalks = await _cloudRepository!.loadTalks(topicId);
-      // Keep local-only pending posts. Confirmed cloud versions take precedence
-      // for matching IDs so activity never rewrites stale content.
-      final localTalks = _localTalks[topicId] ?? const <TalkPost>[];
-      final byId = <String, TalkPost>{
-        for (final post in localTalks)
-          if (post.id != null) post.id!: post,
-        for (final post in cloudTalks)
-          if (post.id != null) post.id!: post,
-      };
-      _localTalks[topicId] = [
-        ...localTalks.where((post) => post.id == null),
-        ...byId.values,
-      ];
-      await _localStore.saveTalks(topicId, _localTalks[topicId]!);
-      notifyListeners();
-    } on Object catch (error) {
-      _cloudError = error;
-      notifyListeners();
+    Future<void> Function(CloudTierRepository cloud) write, {
+    String? expectedUid,
+    PendingTalkReply? pendingReply,
+  }) async {
+    if (_cloudRepository == null || !_cloudTopicIds.contains(topicId)) {
+      return true;
     }
+    final uid = expectedUid ?? currentDataUserId;
+    final key = '$uid|$topicId';
+    final previous = _talkWriteChains[key] ?? Future<void>.value();
+    final result = previous.then((_) async {
+      try {
+        final pending = await _localStore.loadPendingTalkReplies(uid, topicId);
+        if (pendingReply != null &&
+            !pending.any((p) => p.reply.id == pendingReply.reply.id)) {
+          pending.add(pendingReply);
+          await _localStore.savePendingTalkReplies(uid, topicId, pending);
+        }
+        if (currentDataUserId != uid) {
+          throw StateError('The active account changed');
+        }
+        while (pending.isNotEmpty) {
+          final first = pending.first;
+          if (currentDataUserId != uid) {
+            throw StateError('The active account changed');
+          }
+          await _cloudRepository!.createTalkReply(
+            topicId,
+            first.postId,
+            first.reply,
+            parentReplyId: first.parentReplyId,
+          );
+          pending.removeAt(0);
+          await _localStore.savePendingTalkReplies(uid, topicId, pending);
+        }
+        if (currentDataUserId != uid) {
+          throw StateError('The active account changed');
+        }
+        await write(_cloudRepository!);
+        final cloudTalks = await _cloudRepository!.loadTalks(topicId);
+        if (currentDataUserId != uid) return true;
+        // Keep local-only pending posts. Confirmed cloud versions take precedence
+        // for matching IDs so activity never rewrites stale content.
+        final localTalks = _localTalks[topicId] ?? const <TalkPost>[];
+        final byId = <String, TalkPost>{
+          for (final post in localTalks)
+            if (post.id != null) post.id!: post,
+          for (final post in cloudTalks)
+            if (post.id != null) post.id!: post,
+        };
+        _localTalks[topicId] = [
+          ...localTalks.where((post) => post.id == null),
+          ...byId.values,
+        ];
+        if (currentDataUserId != uid) return true;
+        await _loadOwnTalkReactions(topicId, uid);
+        await _restorePendingTalkReplies(topicId, uid);
+        await _localStore.saveTalks(topicId, _localTalks[topicId]!);
+        _cloudError = null;
+        notifyListeners();
+        return true;
+      } on Object catch (error) {
+        _cloudError = error;
+        if (currentDataUserId == uid) {
+          await _restorePendingTalkReplies(topicId, uid);
+          await _localStore.saveTalks(
+            topicId,
+            _localTalks[topicId] ?? const [],
+          );
+        }
+        notifyListeners();
+        return false;
+      }
+    });
+    _talkWriteChains[key] = result.then<void>((_) {}).catchError((Object _) {});
+    return result;
+  }
+
+  Future<bool> retryPendingTalkReplies(String topicId) =>
+      _syncTalkWrite(topicId, (_) async {});
+
+  Future<void> _restorePendingTalkReplies(String topicId, String uid) async {
+    final pending = await _localStore.loadPendingTalkReplies(uid, topicId);
+    final local = _localTalks[topicId];
+    if (local == null) return;
+    bool contains(List<TalkReply> replies, String id) =>
+        replies.any((reply) => reply.id == id || contains(reply.replies, id));
+    for (final entry in pending) {
+      final index = local.indexWhere((post) => post.id == entry.postId);
+      if (index < 0 || contains(local[index].replies, entry.reply.id)) continue;
+      final post = local[index];
+      local[index] = post.copyWith(
+        replies:
+            entry.parentReplyId != null &&
+                contains(post.replies, entry.parentReplyId!)
+            ? _appendNestedReply(
+                post.replies,
+                entry.parentReplyId!,
+                entry.reply,
+              )
+            : [...post.replies, entry.reply],
+      );
+    }
+  }
+
+  Future<void> _loadOwnTalkReactions(String topicId, String uid) async {
+    final own = await _cloudRepository!.loadOwnTalkReactions(topicId);
+    if (currentDataUserId != uid) return;
+    _talkReactions.removeWhere((key, _) => key.startsWith('$uid|$topicId|'));
+    for (final entry in own.entries) {
+      _talkReactions['$uid|$topicId|${entry.key}'] = entry.value;
+    }
+    await _saveTalkReactions();
+  }
+
+  Future<void> _saveTalkReactions() async {
+    final preferences = await SharedPreferences.getInstance();
+    await preferences.setStringList(
+      'talkReactions',
+      _talkReactions.entries
+          .map((entry) => '${entry.key}=${entry.value}')
+          .toList(),
+    );
   }
 
   Future<AuthResult> signUpWithEmail(String email, String password) async {
@@ -1444,7 +1565,7 @@ class AppState extends ChangeNotifier {
       _talkReactions.clear();
       _reportedTalkTargets.clear();
       _reportedTopicIds.clear();
-      await _localStore.clearUserData();
+      await _localStore.clearUserData(uid: user.uid);
       final preferences = await SharedPreferences.getInstance();
       await Future.wait([
         preferences.remove('likedTopicIds'),

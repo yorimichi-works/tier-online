@@ -7,6 +7,8 @@ import 'package:firebase_storage/firebase_storage.dart';
 
 import '../domain/internationalization.dart';
 import '../domain/talk_activity.dart';
+import '../domain/talk_reactions.dart';
+import '../domain/talk_write_policy.dart';
 import '../models/tier_models.dart';
 import '../models/tier_serialization.dart';
 import 'cloud_tier_repository.dart';
@@ -27,6 +29,26 @@ class FirebaseTierRepository implements CloudTierRepository {
   final FirebaseFirestore _firestore;
   final FirebaseStorage _storage;
   final FirebaseFunctions _functions;
+  final Map<String, Map<String, String>> _ownTalkReactions = {};
+
+  Future<TalkWritePolicy> _talkPolicy() async {
+    try {
+      final snapshot = await _firestore
+          .doc('clientPolicies/talks')
+          .get(const GetOptions(source: Source.server));
+      return TalkWritePolicy.fromMap(snapshot.data());
+    } on FirebaseException catch (error) {
+      if (error.code == 'permission-denied') {
+        return const TalkWritePolicy.legacy();
+      }
+      rethrow;
+    }
+  }
+
+  Future<void> _requireTalkWrite(String uid) async {
+    (await _talkPolicy()).requireWritable();
+    if (currentUserId != uid) throw StateError('The active account changed');
+  }
 
   @override
   String get currentUserId => _auth.currentUser!.uid;
@@ -386,18 +408,32 @@ class FirebaseTierRepository implements CloudTierRepository {
 
   @override
   Future<List<TalkPost>> loadTalks(String topicId) async {
+    final uid = currentUserId;
+    final policy = await _talkPolicy();
     final snapshot = await _topics.doc(topicId).collection('talks').get();
-    return Future.wait(
+    final own = <String, String>{};
+    final posts = await Future.wait(
       snapshot.docs.map((document) async {
+        final post = TierSerialization.talkFromJson({
+          ...document.data(),
+          'id': document.id,
+        });
+        if (policy.readProtocol < 2) return post;
         final replies = await document.reference.collection('replies').get();
         final reactions = await document.reference
             .collection('reactions')
             .get();
+        for (final reaction in reactions.docs) {
+          if (reaction.id != uid) continue;
+          final votes = Map<String, String>.from(
+            reaction.data()['votes'] as Map? ?? const {},
+          );
+          for (final entry in votes.entries) {
+            own['${document.id}|${entry.key}'] = entry.value;
+          }
+        }
         return withTalkActivity(
-          TierSerialization.talkFromJson({
-            ...document.data(),
-            'id': document.id,
-          }),
+          post,
           [
             for (final reply in replies.docs) {...reply.data(), 'id': reply.id},
           ],
@@ -405,14 +441,26 @@ class FirebaseTierRepository implements CloudTierRepository {
         );
       }),
     );
+    _ownTalkReactions['$uid|$topicId'] = own;
+    return posts;
+  }
+
+  @override
+  Future<Map<String, String>> loadOwnTalkReactions(String topicId) async {
+    final key = '$currentUserId|$topicId';
+    if (!_ownTalkReactions.containsKey(key)) await loadTalks(topicId);
+    return Map.of(_ownTalkReactions[key] ?? const {});
   }
 
   @override
   Future<void> createTalk(String topicId, TalkPost post) async {
+    final uid = currentUserId;
+    await _requireTalkWrite(uid);
     if (post.id == null) throw ArgumentError('A talk ID is required');
     await _topics.doc(topicId).collection('talks').doc(post.id).set({
       ...TierSerialization.talkToJson(post),
-      'authorUserId': currentUserId,
+      'authorUserId': uid,
+      ...TalkClientVersion.fields,
       'replies': <Object?>[],
       'upvotes': 0,
       'downvotes': 0,
@@ -425,46 +473,55 @@ class FirebaseTierRepository implements CloudTierRepository {
     String postId,
     TalkReply reply, {
     String? parentReplyId,
-  }) => _topics
-      .doc(topicId)
-      .collection('talks')
-      .doc(postId)
-      .collection('replies')
-      .doc(reply.id)
-      .set({
-        ...TierSerialization.replyToJson(reply),
-        'authorUserId': currentUserId,
-        'parentReplyId': parentReplyId,
-        'replies': <Object?>[],
-        'upvotes': 0,
-        'downvotes': 0,
-      });
+  }) async {
+    final uid = currentUserId;
+    await _requireTalkWrite(uid);
+    await _topics
+        .doc(topicId)
+        .collection('talks')
+        .doc(postId)
+        .collection('replies')
+        .doc(reply.id)
+        .set({
+          ...TierSerialization.replyToJson(reply),
+          'authorUserId': uid,
+          ...TalkClientVersion.fields,
+          'parentReplyId': parentReplyId,
+          'replies': <Object?>[],
+          'upvotes': 0,
+          'downvotes': 0,
+        });
+  }
 
   @override
-  Future<void> setTalkReaction(
+  Future<TalkReactionResult> toggleTalkReaction(
     String topicId,
     String postId, {
     String? replyId,
-    required String? reaction,
+    required bool positive,
   }) async {
+    final uid = currentUserId;
+    await _requireTalkWrite(uid);
     final reference = _topics
         .doc(topicId)
         .collection('talks')
         .doc(postId)
         .collection('reactions')
-        .doc(currentUserId);
-    await _firestore.runTransaction((transaction) async {
+        .doc(uid);
+    return _firestore.runTransaction((transaction) async {
+      if (currentUserId != uid) throw StateError('The active account changed');
       final existing = await transaction.get(reference);
-      final votes = Map<String, dynamic>.from(
+      final votes = Map<String, String>.from(
         existing.data()?['votes'] as Map? ?? const {},
       );
       final target = replyId ?? 'root';
-      if (reaction == null) {
-        votes.remove(target);
-      } else {
-        votes[target] = reaction;
-      }
-      transaction.set(reference, {'userId': currentUserId, 'votes': votes});
+      final next = toggleTalkVote(votes, target, positive);
+      transaction.set(reference, {
+        'userId': uid,
+        'votes': next.votes,
+        ...TalkClientVersion.fields,
+      });
+      return TalkReactionResult(reaction: next.reaction, ownVotes: next.votes);
     });
   }
 
