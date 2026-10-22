@@ -163,7 +163,19 @@ test("canonical locale redirects preserve the remainder of the URL", () => {
   assert.equal(canonicalLocalePath("/pt-br/search"), null);
 });
 
-test("sitemap index and robots handlers return correct status and content types", async () => {
+test("sitemap index and robots handlers return correct status and content types", async (context) => {
+  // Exercise HTTP output without a Firebase app or a connection to live data.
+  const query = {
+    where: () => query,
+    orderBy: () => query,
+    limit: () => query,
+    select: () => query,
+    get: async () => ({docs: [], size: 0}),
+    count: () => ({get: async () => ({data: () => ({count: 0})})}),
+  };
+  context.mock.method(require("firebase-admin/firestore"), "getFirestore", () => ({
+    collection: () => query,
+  }));
   const sitemapResponse = await invokeHttpFunction(
     sitemap,
     "/sitemap.xml",
