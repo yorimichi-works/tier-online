@@ -13,6 +13,51 @@ import 'package:tier_table_online/services/tier_aggregation_service.dart';
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
+  test(
+    'cloud actions write only a new post, reply, or personal reaction',
+    () async {
+      final repository = DummyTierRepository();
+      final cloud = _FakeCloudTierRepository();
+      final state = AppState(repository, cloudRepository: cloud);
+      await state.initialize();
+      final topic = repository.getById('cloud-topic')!;
+      const pending = TalkPost(
+        id: 'pending-local-only',
+        author: 'name',
+        body: 'unsent draft',
+        rank: TierRank.b,
+        minutesAgo: 0,
+      );
+      await LocalTierStore().saveTalks(topic.id, [pending]);
+      await state.load(topic.id);
+      await state.postTalk(topic.id, body: 'new post', rank: TierRank.s);
+      expect(cloud.createdTalks.length, 1);
+      expect(cloud.createdTalks.single.body, 'new post');
+      final postId = cloud.createdTalks.single.id!;
+      await state.replyToTalk(topic, postId: postId, body: 'new reply');
+      expect(cloud.createdTalks.length, 1);
+      expect(cloud.createdReplies.single.postId, postId);
+      expect(cloud.createdReplies.single.reply.body, 'new reply');
+      await state.reactToTalk(topic, postId: postId, positive: true);
+      expect(cloud.reactionWrites.single.reaction, 'up');
+      expect(cloud.createdTalks.length, 1);
+      expect(cloud.createdReplies.length, 1);
+      await state.reactToTalk(topic, postId: postId, positive: true);
+      expect(cloud.reactionWrites.last.reaction, isNull);
+      expect(
+        state.talksFor(topic).any((post) => post.id == pending.id),
+        isTrue,
+      );
+      expect(
+        (await LocalTierStore().loadTalks(
+          topic.id,
+        )).any((post) => post.id == pending.id),
+        isTrue,
+      );
+      state.dispose();
+    },
+  );
+
   test('JP・KR・TW/HK・BRを各言語へ、それ以外を英語へ振り分ける', () {
     expect(AppLocaleParser.fromDevice(const Locale('en', 'JP')), AppLocale.ja);
     expect(AppLocaleParser.fromDevice(const Locale('en', 'KR')), AppLocale.ko);
@@ -522,6 +567,9 @@ class _FakeCloudTierRepository implements CloudTierRepository {
   final savedSubmissions = <UserTierSubmission>[];
   final deletedTopicIds = <String>[];
   final loadedTopicIds = <String>[];
+  final createdTalks = <TalkPost>[];
+  final createdReplies = <({String postId, TalkReply reply})>[];
+  final reactionWrites = <({String postId, String? reaction})>[];
   String userId = 'firebase-user';
   bool failDeletion = false;
 
@@ -600,10 +648,33 @@ class _FakeCloudTierRepository implements CloudTierRepository {
       List.of(submissions);
 
   @override
-  Future<List<TalkPost>> loadTalks(String topicId) async => const [];
+  Future<List<TalkPost>> loadTalks(String topicId) async =>
+      List.of(createdTalks);
 
   @override
-  Future<void> saveTalks(String topicId, List<TalkPost> posts) async {}
+  Future<void> createTalk(String topicId, TalkPost post) async {
+    createdTalks.add(post);
+  }
+
+  @override
+  Future<void> createTalkReply(
+    String topicId,
+    String postId,
+    TalkReply reply, {
+    String? parentReplyId,
+  }) async {
+    createdReplies.add((postId: postId, reply: reply));
+  }
+
+  @override
+  Future<void> setTalkReaction(
+    String topicId,
+    String postId, {
+    String? replyId,
+    required String? reaction,
+  }) async {
+    reactionWrites.add((postId: postId, reaction: reaction));
+  }
 
   @override
   Future<void> reportTalk(

@@ -10,7 +10,19 @@ abstract interface class CloudTierRepository {
   Future<void> saveSubmission(UserTierSubmission submission);
   Future<List<UserTierSubmission>> loadSubmissions(String topicId);
   Future<List<TalkPost>> loadTalks(String topicId);
-  Future<void> saveTalks(String topicId, List<TalkPost> posts);
+  Future<void> createTalk(String topicId, TalkPost post);
+  Future<void> createTalkReply(
+    String topicId,
+    String postId,
+    TalkReply reply, {
+    String? parentReplyId,
+  });
+  Future<void> setTalkReaction(
+    String topicId,
+    String postId, {
+    String? replyId,
+    required String? reaction,
+  });
   Future<void> reportTalk(
     String topicId, {
     required String postId,

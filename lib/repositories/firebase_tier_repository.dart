@@ -6,6 +6,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 
 import '../domain/internationalization.dart';
+import '../domain/talk_activity.dart';
 import '../models/tier_models.dart';
 import '../models/tier_serialization.dart';
 import 'cloud_tier_repository.dart';
@@ -386,33 +387,85 @@ class FirebaseTierRepository implements CloudTierRepository {
   @override
   Future<List<TalkPost>> loadTalks(String topicId) async {
     final snapshot = await _topics.doc(topicId).collection('talks').get();
-    return [
-      for (final document in snapshot.docs)
-        TierSerialization.talkFromJson({...document.data(), 'id': document.id}),
-    ];
+    return Future.wait(
+      snapshot.docs.map((document) async {
+        final replies = await document.reference.collection('replies').get();
+        final reactions = await document.reference
+            .collection('reactions')
+            .get();
+        return withTalkActivity(
+          TierSerialization.talkFromJson({
+            ...document.data(),
+            'id': document.id,
+          }),
+          [
+            for (final reply in replies.docs) {...reply.data(), 'id': reply.id},
+          ],
+          [for (final reaction in reactions.docs) reaction.data()],
+        );
+      }),
+    );
   }
 
   @override
-  Future<void> saveTalks(String topicId, List<TalkPost> posts) async {
-    final batch = _firestore.batch();
-    final collection = _topics.doc(topicId).collection('talks');
-    for (final post in posts) {
-      if (post.id == null) continue;
-      batch.set(collection.doc(post.id), {
-        ...TierSerialization.talkToJson(post),
-        'replyAuthorIds': _replyAuthorIds(post.replies).toList(),
-      });
-    }
-    await batch.commit();
+  Future<void> createTalk(String topicId, TalkPost post) async {
+    if (post.id == null) throw ArgumentError('A talk ID is required');
+    await _topics.doc(topicId).collection('talks').doc(post.id).set({
+      ...TierSerialization.talkToJson(post),
+      'authorUserId': currentUserId,
+      'replies': <Object?>[],
+      'upvotes': 0,
+      'downvotes': 0,
+    });
   }
 
-  Set<String> _replyAuthorIds(List<TalkReply> replies) {
-    final ids = <String>{};
-    for (final reply in replies) {
-      if (reply.authorUserId != null) ids.add(reply.authorUserId!);
-      ids.addAll(_replyAuthorIds(reply.replies));
-    }
-    return ids;
+  @override
+  Future<void> createTalkReply(
+    String topicId,
+    String postId,
+    TalkReply reply, {
+    String? parentReplyId,
+  }) => _topics
+      .doc(topicId)
+      .collection('talks')
+      .doc(postId)
+      .collection('replies')
+      .doc(reply.id)
+      .set({
+        ...TierSerialization.replyToJson(reply),
+        'authorUserId': currentUserId,
+        'parentReplyId': parentReplyId,
+        'replies': <Object?>[],
+        'upvotes': 0,
+        'downvotes': 0,
+      });
+
+  @override
+  Future<void> setTalkReaction(
+    String topicId,
+    String postId, {
+    String? replyId,
+    required String? reaction,
+  }) async {
+    final reference = _topics
+        .doc(topicId)
+        .collection('talks')
+        .doc(postId)
+        .collection('reactions')
+        .doc(currentUserId);
+    await _firestore.runTransaction((transaction) async {
+      final existing = await transaction.get(reference);
+      final votes = Map<String, dynamic>.from(
+        existing.data()?['votes'] as Map? ?? const {},
+      );
+      final target = replyId ?? 'root';
+      if (reaction == null) {
+        votes.remove(target);
+      } else {
+        votes[target] = reaction;
+      }
+      transaction.set(reference, {'userId': currentUserId, 'votes': votes});
+    });
   }
 
   @override

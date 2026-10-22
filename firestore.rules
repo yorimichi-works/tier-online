@@ -110,10 +110,89 @@ service cloud.firestore {
       }
 
       match /talks/{talkId} {
+        function canParticipate() {
+          return signedIn() && canViewTopic(topicId) && emailVerifiedOrExempt();
+        }
+
+        function ownContent() {
+          // Missing legacy ownership is never inferred from a name/topic owner.
+          return resource.data.get('authorUserId', '') == request.auth.uid;
+        }
+
+        function emptyActivity(data) {
+          return data.get('replies', []) == [] &&
+            data.get('upvotes', 0) is int && data.get('downvotes', 0) is int &&
+            data.get('upvotes', 0) == 0 && data.get('downvotes', 0) == 0;
+        }
+
+        function serializedDate(value) {
+          return value is string && value.matches(
+            '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}[.][0-9]{3,6}Z?$'
+          );
+        }
+
         allow read: if canViewTopic(topicId);
-        allow create, update: if signedIn() && canViewTopic(topicId) &&
-          emailVerifiedOrExempt();
+        allow create: if canParticipate() &&
+          request.resource.data.keys().hasOnly([
+            'id', 'author', 'body', 'rank', 'minutesAgo', 'createdAt',
+            'authorUserId', 'attachedTier', 'replies', 'upvotes', 'downvotes'
+          ]) &&
+          request.resource.data.get('id', '') == talkId &&
+          request.resource.data.get('authorUserId', '') == request.auth.uid &&
+          request.resource.data.get('author', null) is string &&
+          request.resource.data.get('body', null) is string &&
+          request.resource.data.get('rank', '') in ['ss', 's', 'a', 'b', 'c', 'd'] &&
+          request.resource.data.get('minutesAgo', 0) is int &&
+          request.resource.data.get('attachedTier', false) is bool &&
+          (request.resource.data.get('createdAt', null) == null ||
+           serializedDate(request.resource.data.createdAt)) &&
+          emptyActivity(request.resource.data);
+        // Freeze identity, embedded legacy replies and historical counters.
+        allow update: if canParticipate() && ownContent() &&
+          request.resource.data.body is string &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['body']);
         allow delete: if ownsTopic(topicId);
+
+        match /replies/{replyId} {
+          allow read: if canViewTopic(topicId) &&
+            exists(/databases/$(database)/documents/topics/$(topicId)/talks/$(talkId));
+          allow create: if canParticipate() &&
+            exists(/databases/$(database)/documents/topics/$(topicId)/talks/$(talkId)) &&
+            request.resource.data.keys().hasOnly([
+              'id', 'author', 'body', 'createdAt', 'stance', 'authorUserId',
+              'parentReplyId', 'replies', 'upvotes', 'downvotes'
+            ]) &&
+            replyId != 'root' && request.resource.data.get('id', '') == replyId &&
+            request.resource.data.get('authorUserId', '') == request.auth.uid &&
+            request.resource.data.get('author', null) is string &&
+            request.resource.data.get('body', null) is string &&
+            serializedDate(request.resource.data.get('createdAt', null)) &&
+            request.resource.data.get('stance', null) in [null, 'agree', 'object'] &&
+            (request.resource.data.get('parentReplyId', null) == null ||
+             request.resource.data.parentReplyId is string) &&
+            emptyActivity(request.resource.data);
+          allow update: if canParticipate() && ownContent() &&
+            exists(/databases/$(database)/documents/topics/$(topicId)/talks/$(talkId)) &&
+            request.resource.data.body is string &&
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly(['body']);
+          allow delete: if ownsTopic(topicId);
+        }
+
+        // One document per UID; votes maps root/reply IDs to up/down. A user
+        // can replace only their own choices, never another user's choices or
+        // the parent content/counters. Unknown targets have no display effect.
+        match /reactions/{userId} {
+          allow read: if canViewTopic(topicId) &&
+            exists(/databases/$(database)/documents/topics/$(topicId)/talks/$(talkId));
+          allow create, update: if canParticipate() && request.auth.uid == userId &&
+            exists(/databases/$(database)/documents/topics/$(topicId)/talks/$(talkId)) &&
+            request.resource.data.keys().hasOnly(['userId', 'votes']) &&
+            request.resource.data.get('userId', '') == userId &&
+            request.resource.data.get('votes', null) is map &&
+            request.resource.data.votes.size() <= 1000 &&
+            request.resource.data.votes.values().toSet().hasOnly(['up', 'down']);
+          allow delete: if canParticipate() && request.auth.uid == userId;
+        }
       }
 
       match /reports/{reportId} {

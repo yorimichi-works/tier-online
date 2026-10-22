@@ -645,9 +645,9 @@ class AppState extends ChangeNotifier {
       try {
         final cloudTalks = await _cloudRepository!.loadTalks(topicId);
         final byId = <String, TalkPost>{
-          for (final post in cloudTalks)
-            if (post.id != null) post.id!: post,
           for (final post in _localTalks[topicId]!)
+            if (post.id != null) post.id!: post,
+          for (final post in cloudTalks)
             if (post.id != null) post.id!: post,
         };
         final withoutId = _localTalks[topicId]!.where(
@@ -796,22 +796,20 @@ class AppState extends ChangeNotifier {
     bool attachOwnTier = false,
   }) async {
     final posts = _localTalks.putIfAbsent(topicId, () => []);
-    posts.insert(
-      0,
-      TalkPost(
-        id: 'talk-${DateTime.now().microsecondsSinceEpoch}',
-        author: currentUserName,
-        body: body,
-        rank: rank,
-        minutesAgo: 0,
-        createdAt: DateTime.now(),
-        authorUserId: currentDataUserId,
-        attachedTier: attachOwnTier,
-      ),
+    final post = TalkPost(
+      id: 'talk-${DateTime.now().microsecondsSinceEpoch}',
+      author: currentUserName,
+      body: body,
+      rank: rank,
+      minutesAgo: 0,
+      createdAt: DateTime.now(),
+      authorUserId: currentDataUserId,
+      attachedTier: attachOwnTier,
     );
+    posts.insert(0, post);
     notifyListeners();
     await _localStore.saveTalks(topicId, posts);
-    await _syncTalks(topicId, posts);
+    await _syncTalkWrite(topicId, (cloud) => cloud.createTalk(topicId, post));
   }
 
   Future<void> replyToTalk(
@@ -851,7 +849,15 @@ class AppState extends ChangeNotifier {
     );
     notifyListeners();
     await _localStore.saveTalks(topic.id, local);
-    await _syncTalks(topic.id, talksFor(topic));
+    await _syncTalkWrite(
+      topic.id,
+      (cloud) => cloud.createTalkReply(
+        topic.id,
+        postId,
+        reply,
+        parentReplyId: parentReplyId,
+      ),
+    );
   }
 
   List<TalkReply> _appendNestedReply(
@@ -928,7 +934,15 @@ class AppState extends ChangeNotifier {
           .toList(),
     );
     await _localStore.saveTalks(topic.id, local);
-    await _syncTalks(topic.id, talksFor(topic));
+    await _syncTalkWrite(
+      topic.id,
+      (cloud) => cloud.setTalkReaction(
+        topic.id,
+        postId,
+        replyId: replyId,
+        reaction: togglingOff ? null : next,
+      ),
+    );
   }
 
   List<TalkReply> _updateReplyReaction(
@@ -988,10 +1002,29 @@ class AppState extends ChangeNotifier {
     return true;
   }
 
-  Future<void> _syncTalks(String topicId, List<TalkPost> posts) async {
+  Future<void> _syncTalkWrite(
+    String topicId,
+    Future<void> Function(CloudTierRepository cloud) write,
+  ) async {
     if (_cloudRepository == null || !_cloudTopicIds.contains(topicId)) return;
     try {
-      await _cloudRepository!.saveTalks(topicId, posts);
+      await write(_cloudRepository!);
+      final cloudTalks = await _cloudRepository!.loadTalks(topicId);
+      // Keep local-only pending posts. Confirmed cloud versions take precedence
+      // for matching IDs so activity never rewrites stale content.
+      final localTalks = _localTalks[topicId] ?? const <TalkPost>[];
+      final byId = <String, TalkPost>{
+        for (final post in localTalks)
+          if (post.id != null) post.id!: post,
+        for (final post in cloudTalks)
+          if (post.id != null) post.id!: post,
+      };
+      _localTalks[topicId] = [
+        ...localTalks.where((post) => post.id == null),
+        ...byId.values,
+      ];
+      await _localStore.saveTalks(topicId, _localTalks[topicId]!);
+      notifyListeners();
     } on Object catch (error) {
       _cloudError = error;
       notifyListeners();
