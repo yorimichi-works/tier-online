@@ -56,6 +56,7 @@ const enforceAppCheck = defineBoolean("ENFORCE_APP_CHECK", {default: false});
 const callableOptions = {enforceAppCheck};
 
 export {renderHome, renderTopic, sitemap} from "./seo";
+export {bingoSitemap, renderBingo} from "./bingoSeo";
 
 function isAnonymousRequest(authToken: {firebase?: {sign_in_provider?: string}}): boolean {
   return authToken.firebase?.sign_in_provider === "anonymous";

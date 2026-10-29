@@ -28,6 +28,15 @@ tier表オンラインと同じFlutterプロジェクト・同じFirebaseプロ�
 - **みんなの結果**: 参加者数、BINGO達成者数・達成率、よくチェックされたマスのランキング。
 - **マイビンゴ**: 参加したビンゴ・作ったビンゴ。作成者は公開/非公開切り替えと削除が可能。
 - **報告**: ボード・コメントを報告。5件で自動的に非公開化（コメントは非表示）。
+- **いいね・リアクション**: ビンゴに「いいね」（人気順は 参加者 + いいね×2 + コメント）。
+  コメントには 👏🎉😂❤️ のリアクションを1人1つ付けられ、付け替え・取り消しもできる。
+- **ログイン**: tier-onlineと共通のアカウント（メール/パスワード、Google）。ゲストのまま
+  新規登録するとuidを引き継ぐ（匿名ユーザーへのリンク）ので、作ったビンゴやカードはそのまま。
+  既存アカウントへのログインは切り替え確認を出す。パスワード登録はメール確認後に投稿可能。
+  設定画面からログアウト・アカウント削除（Tier/Bingoの全データを削除）。画像アップロードは
+  Tierと同じく登録者のみ（Appleのジャケット画像はゲストも可）。
+- **共有リンクのOGP**: `/{locale}/bingo/{id}` をX・LINE等に貼ると、ビンゴのタイトル・説明と
+  最初の画像マス（なければ言語別の既定画像）がプレビューに出る。
 
 ## 多言語・地域（tier-online方式）
 
@@ -64,6 +73,25 @@ web_bingo/                          ビンゴ用 index.html / manifest.json
 Firebaseに接続できない場合も端末内保存で動作する（tier-onlineと同じ方針）。
 サンプルビンゴは常に端末内で遊べる。
 
+## ログイン
+
+認証の処理は `lib/services/account_auth_service.dart`（`AccountAuthService`）にまとめ、
+ビンゴはこれを使う。Tierの `AppState` と同じ手順（匿名ユーザーへのリンク、Googleのアカウント
+競合時のパスワード確認による統合、モバイルWebのリダイレクト方式、ログアウト後は新しいゲスト、
+`deleteUserAccount` による削除）で、型（`AuthResult` など）はTierと共有している。
+Tierの `AppState` もいずれこのサービスへ委譲できる。
+
+## 共有リンクのOGP
+
+`renderBingo`（`functions/src/bingoSeo.ts`）がHostingのリライト先になり、デプロイ済みの
+`index.html` を取得して `<!--bingo-meta-->` ブロックだけを言語別・ビンゴ別のメタデータに
+差し替える（Tierの `seo.ts` のようにHTMLを二重管理しない）。非公開・ブロック・存在しない
+ビンゴは既定メタ＋`noindex`で404。`/sitemap.xml` は `bingoSitemap`。
+サイトのURLはFunctionsのパラメータ `BINGO_SITE_ORIGIN`（既定 `https://bingo-online.web.app`）。
+
+既定のOG画像（`web_bingo/og-image-{locale}.png`）とアイコンは `node playwright/bingo-assets.mjs`
+で再生成できる。
+
 ## Firestore
 
 | パス | 書き込み |
@@ -72,6 +100,8 @@ Firebaseに接続できない場合も端末内保存で動作する（tier-onli
 | `bingos/{id}/bingoEntries/{uid}` | 本人のみ。形式をRulesで検証 |
 | `bingos/{id}/comments/{commentId}` | `postBingoComment`。削除は投稿者またはボード作成者 |
 | `bingos/{id}/reports/{type}_{targetId}_{uid}` | 本人が1回だけ作成 |
+| `bingos/{id}/likes/{uid}` | 本人のみ作成・削除。`aggregateBingoLikes` が `likeCount` を更新 |
+| `bingos/{id}/comments/{cid}/reactions/{uid}` | 本人のみ。`countBingoCommentReactions` が `reactionCounts` を更新 |
 
 - `listed` = 公開かつ非ブロック。一覧クエリは `listed == true` + `createdAt desc`。
 - 集計（参加者数・BINGO数・マス別チェック数）は `aggregateBingoEntries` トリガー、
@@ -79,8 +109,7 @@ Firebaseに接続できない場合も端末内保存で動作する（tier-onli
 - NGワード・個人情報判定・レート制限はTierと共通（`bingoPublish` / `bingoComment` を追加）。
 - アカウント削除（`deleteUserAccount`）でビンゴのデータも削除する。
 - アップロード画像は `users/{uid}/bingos/{bingoId}/cells/{n}.jpg`。Storage Rulesで
-  `image/jpeg` かつ200KB未満に制限し、圧縮されていない画像は受け付けない。ビンゴは登録導線が
-  まだないため匿名ユーザーにもアップロードを許可している（Tierは登録必須）。
+  登録ユーザー（匿名以外）・`image/jpeg`・200KB未満に制限し、圧縮されていない画像は受け付けない。
 
 ## 開発
 
@@ -102,12 +131,19 @@ npm test
 
 Hostingはtier-onlineとは別サイト（例: `bingo-online`）にする。初回のみサイトを作成する。
 
+HostingのリライトがFunctions（`renderBingo` / `bingoSitemap`）を参照するので、
+Rules・インデックス・Functionsを先にデプロイする。サイトURLが既定と違う場合は
+`functions/.env.tier-online` に `BINGO_SITE_ORIGIN=https://...` を書く。
+
 ```sh
 firebase hosting:sites:create bingo-online --project tier-online
+firebase deploy --only firestore:rules,firestore:indexes,storage,functions --project tier-online
 ./scripts/build_bingo_web.sh
 firebase deploy --config firebase.bingo.json --only hosting --project tier-online
-firebase deploy --only firestore:rules,firestore:indexes,storage,functions --project tier-online
 ```
+
+Googleログインを使うには、Firebase Authenticationの「承認済みドメイン」に
+ビンゴのドメイン（例: `bingo-online.web.app`）を追加する。
 
 ## tier-onlineとの統合に向けて
 

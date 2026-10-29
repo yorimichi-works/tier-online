@@ -8,19 +8,44 @@
       "**/node_modules/**"
     ],
     "rewrites": [
-      { "source": "**", "destination": "/index.html" }
+      {
+        "source": "/sitemap.xml",
+        "function": "bingoSitemap"
+      },
+      {
+        "source": "/{ja,ko,zh-tw,pt-br,en}/**",
+        "function": "renderBingo"
+      },
+      {
+        "source": "/{ja,ko,zh-tw,pt-br,en}",
+        "function": "renderBingo"
+      },
+      {
+        "source": "/",
+        "function": "renderBingo"
+      },
+      {
+        "source": "**",
+        "destination": "/index.html"
+      }
     ],
     "headers": [
       {
         "source": "**/*.@(html|js|json)",
         "headers": [
-          { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }
+          {
+            "key": "Cache-Control",
+            "value": "no-cache, no-store, must-revalidate"
+          }
         ]
       },
       {
         "source": "/",
         "headers": [
-          { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }
+          {
+            "key": "Cache-Control",
+            "value": "no-cache, no-store, must-revalidate"
+          }
         ]
       }
     ]

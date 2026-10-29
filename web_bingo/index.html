@@ -8,11 +8,17 @@
   <meta charset="UTF-8">
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <!--bingo-meta-->
+  <title>ビンゴオンライン｜ビンゴを作って、みんなで参加</title>
   <meta name="description" content="ビンゴを作って公開、みんなで参加。結果をコメントでシェアしよう。">
   <meta property="og:type" content="website">
   <meta property="og:title" content="ビンゴオンライン｜ビンゴを作って、みんなで参加">
   <meta property="og:description" content="ビンゴを作って公開、みんなで参加。結果をコメントでシェアしよう。">
-  <meta name="twitter:card" content="summary">
+  <meta property="og:image" content="/og-image-ja.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <!--/bingo-meta-->
+  <!-- The renderBingo Function (functions/src/bingoSeo.ts) replaces the
+       block above with per-page, per-language metadata for link previews. -->
   <meta name="theme-color" content="#FFFFFF">
 
   <link rel="preload" href="assets/assets/fonts/NotoSansJP-TierSubset.ttf" as="font" type="font/ttf" crossorigin>
@@ -102,12 +108,12 @@
   <link rel="apple-touch-icon" href="icons/Icon-192.png">
   <link rel="icon" type="image/png" href="favicon.png"/>
 
-  <title>ビンゴオンライン｜ビンゴを作って、みんなで参加</title>
   <link rel="manifest" href="manifest.json">
   <script>
     (() => {
       // Mirror of the Dart locale rules (lib/domain/internationalization.dart),
-      // needed before Flutter starts. Keep in sync with web/index.html.
+      // needed before Flutter starts. Keep in sync with web/index.html and
+      // functions/src/bingoSeo.ts.
       const supportedLocales = Object.freeze(['ja', 'ko', 'en', 'zh-tw', 'pt-br']);
       const hreflangByLocale = Object.freeze({
         ja: 'ja', ko: 'ko', en: 'en', 'zh-tw': 'zh-Hant-TW', 'pt-br': 'pt-BR'
@@ -164,15 +170,21 @@
         }
       }[locale];
       document.documentElement.lang = locale === 'zh-tw' ? 'zh-TW' : locale === 'pt-br' ? 'pt-BR' : locale;
+      window.__bingoServiceName = meta.name;
+      // Pages rendered by the renderBingo Function already carry the right
+      // metadata (marked by meta[name=bingo-rendered]); only fill in the
+      // static shell.
+      if (document.querySelector('meta[name="bingo-rendered"]')) return;
       document.title = meta.title;
       document.querySelector('meta[name="description"]').content = meta.description;
       document.querySelector('meta[property="og:title"]').content = meta.title;
       document.querySelector('meta[property="og:description"]').content = meta.description;
+      document.querySelector('meta[property="og:image"]').content =
+        `${location.origin}/og-image-${locale}.png`;
       const ogLocale = document.createElement('meta');
       ogLocale.setAttribute('property', 'og:locale');
       ogLocale.content = meta.ogLocale;
       document.head.appendChild(ogLocale);
-      window.__bingoServiceName = meta.name;
       if (pathLocale && location.pathname.split('/').filter(Boolean).length === 1) {
         for (const code of supportedLocales) {
           const link = document.createElement('link');
