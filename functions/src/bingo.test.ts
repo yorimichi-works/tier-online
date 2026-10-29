@@ -6,6 +6,7 @@ import {
   FREE,
   isValidLayout,
   lineCount,
+  reactionDelta,
   requiredCells,
   validateBingoInput,
 } from "./bingo";
@@ -91,4 +92,12 @@ test("マス不足・重複・長すぎる文字列を拒否する", () => {
   }, context));
   assert.throws(() => validateBingoInput({title: "", size: 3, cells: textCells(8)}, context));
   assert.throws(() => validateBingoInput({title: "x", size: 6, cells: textCells(40)}, context));
+});
+
+test("リアクションの付け替え・取り消しを件数の増減に変換する", () => {
+  assert.deepEqual(reactionDelta(undefined, "clap"), {clap: 1});
+  assert.deepEqual(reactionDelta("clap", "heart"), {clap: -1, heart: 1});
+  assert.deepEqual(reactionDelta("heart", undefined), {heart: -1});
+  assert.deepEqual(reactionDelta("clap", "clap"), {});
+  assert.deepEqual(reactionDelta(undefined, "evil"), {});
 });

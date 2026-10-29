@@ -515,6 +515,12 @@ class BingoBoardTile extends StatelessWidget {
                             board.commentCount,
                           ),
                         ),
+                        if (board.likeCount > 0)
+                          StatPill(
+                            icon: Icons.favorite_rounded,
+                            color: BingoColors.like,
+                            label: '${board.likeCount}',
+                          ),
                       ],
                     ),
                     if (board.tags.isNotEmpty) ...[

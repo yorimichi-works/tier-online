@@ -103,6 +103,32 @@ test("reports: one per user and target, with a matching id", async () => {
   await assertFails(getDoc(doc(as("bob"), "bingos/pub/reports/comment_c1_bob")));
 });
 
+test("likes: only your own, once, on boards you can see", async () => {
+  const like = (uid, bingoId = "pub") => ({userId: uid, bingoId, createdAt: new Date()});
+  await assertSucceeds(setDoc(doc(as("bob"), "bingos/pub/likes/bob"), like("bob")));
+  await assertFails(setDoc(doc(as("bob"), "bingos/pub/likes/bob"), like("bob")));
+  await assertFails(setDoc(doc(as("bob"), "bingos/pub/likes/alice"), like("alice")));
+  await assertFails(setDoc(doc(as("bob"), "bingos/priv/likes/bob"), like("bob", "priv")));
+  await assertFails(setDoc(doc(as("bob"), "bingos/pub/likes/carol"), {...like("carol"), extra: 1}));
+  await assertSucceeds(getDoc(doc(as("bob"), "bingos/pub/likes/bob")));
+  await assertFails(getDoc(doc(as("alice"), "bingos/pub/likes/bob")));
+  await assertSucceeds(deleteDoc(doc(as("bob"), "bingos/pub/likes/bob")));
+});
+
+test("reactions: one allowed emoji per person per existing comment", async () => {
+  const reaction = (uid, value, commentId = "c1") => ({
+    userId: uid, bingoId: "pub", commentId, reaction: value, updatedAt: new Date(),
+  });
+  await assertSucceeds(setDoc(doc(as("bob"), "bingos/pub/comments/c1/reactions/bob"), reaction("bob", "clap")));
+  await assertSucceeds(setDoc(doc(as("bob"), "bingos/pub/comments/c1/reactions/bob"), reaction("bob", "heart")));
+  await assertFails(setDoc(doc(as("bob"), "bingos/pub/comments/c1/reactions/bob"), reaction("bob", "evil")));
+  await assertFails(setDoc(doc(as("bob"), "bingos/pub/comments/c1/reactions/alice"), reaction("alice", "clap")));
+  await assertFails(setDoc(doc(as("bob"), "bingos/pub/comments/nope/reactions/bob"), reaction("bob", "clap", "nope")));
+  await assertSucceeds(getDocs(query(collectionGroup(as("bob"), "reactions"), where("userId", "==", "bob"), where("bingoId", "==", "pub"))));
+  await assertFails(getDocs(query(collectionGroup(as("bob"), "reactions"), where("bingoId", "==", "pub"))));
+  await assertSucceeds(deleteDoc(doc(as("bob"), "bingos/pub/comments/c1/reactions/bob")));
+});
+
 test("storage: registered users upload compressed JPEG cells only into their own folder", async () => {
   const storage = env.authenticatedContext("bob", {firebase: {sign_in_provider: "password"}}).storage();
   const jpeg = new Uint8Array(1000);

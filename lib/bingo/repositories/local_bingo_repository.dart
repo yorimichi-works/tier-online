@@ -15,6 +15,8 @@ class LocalBingoRepository implements BingoRepository {
   static const _boardPrefix = 'bingo.board.';
   static const _entryPrefix = 'bingo.entry.';
   static const _commentsPrefix = 'bingo.comments.';
+  static const _likePrefix = 'bingo.like.';
+  static const _reactionPrefix = 'bingo.reaction.';
 
   final String userId;
 
@@ -55,10 +57,15 @@ class LocalBingoRepository implements BingoRepository {
 
   Future<BingoBoard> _withStats(BingoBoard board) async {
     final comments = await loadComments(board.id);
+    final preferences = await _preferences;
+    final likes = preferences
+        .getKeys()
+        .where((key) => key.startsWith('$_likePrefix${board.id}.'))
+        .length;
     return BingoLogic.aggregate(
       board,
       await loadEntries(board.id),
-    ).copyWith(commentCount: comments.length);
+    ).copyWith(commentCount: comments.length, likeCount: likes);
   }
 
   @override
@@ -106,7 +113,9 @@ class LocalBingoRepository implements BingoRepository {
     await preferences.remove('$_boardPrefix$boardId');
     await preferences.remove('$_commentsPrefix$boardId');
     for (final key in preferences.getKeys().toList()) {
-      if (key.startsWith('$_entryPrefix$boardId.')) {
+      if (key.startsWith('$_entryPrefix$boardId.') ||
+          key.startsWith('$_likePrefix$boardId.') ||
+          key.startsWith('$_reactionPrefix$boardId.')) {
         await preferences.remove(key);
       }
     }
@@ -157,14 +166,30 @@ class LocalBingoRepository implements BingoRepository {
     final preferences = await _preferences;
     final encoded = preferences.getString('$_commentsPrefix$boardId');
     if (encoded == null) return const [];
+    final List<BingoComment> comments;
     try {
-      return [
+      comments = [
         for (final raw in jsonDecode(encoded) as List<Object?>)
           if (raw is Map) BingoComment.fromJson(raw.cast<String, Object?>()),
       ];
     } on FormatException {
       return const [];
     }
+    // Reaction counts are derived from the stored reactions.
+    final counts = <String, Map<String, int>>{};
+    final prefix = '$_reactionPrefix$boardId.';
+    for (final key in preferences.getKeys()) {
+      if (!key.startsWith(prefix)) continue;
+      final commentId = key.substring(prefix.length).split('.').first;
+      final reaction = preferences.getString(key);
+      if (reaction == null) continue;
+      final perComment = counts.putIfAbsent(commentId, () => {});
+      perComment[reaction] = (perComment[reaction] ?? 0) + 1;
+    }
+    return [
+      for (final comment in comments)
+        comment.copyWith(reactionCounts: counts[comment.id] ?? const {}),
+    ];
   }
 
   Future<void> _saveComments(
@@ -216,6 +241,48 @@ class LocalBingoRepository implements BingoRepository {
     required String targetType,
     required String targetId,
   }) async {}
+
+  @override
+  Future<bool> loadBoardLike(String boardId) async =>
+      (await _preferences).getBool('$_likePrefix$boardId.$userId') ?? false;
+
+  @override
+  Future<void> setBoardLike(String boardId, {required bool liked}) async {
+    final preferences = await _preferences;
+    if (liked) {
+      await preferences.setBool('$_likePrefix$boardId.$userId', true);
+    } else {
+      await preferences.remove('$_likePrefix$boardId.$userId');
+    }
+  }
+
+  @override
+  Future<Map<String, String>> loadMyReactions(String boardId) async {
+    final preferences = await _preferences;
+    final prefix = '$_reactionPrefix$boardId.';
+    return {
+      for (final key in preferences.getKeys())
+        if (key.startsWith(prefix) && key.endsWith('.$userId'))
+          key.substring(prefix.length).split('.').first: ?preferences.getString(
+            key,
+          ),
+    };
+  }
+
+  @override
+  Future<void> setCommentReaction(
+    String boardId,
+    String commentId,
+    String? reactionId,
+  ) async {
+    final preferences = await _preferences;
+    final key = '$_reactionPrefix$boardId.$commentId.$userId';
+    if (reactionId == null) {
+      await preferences.remove(key);
+    } else {
+      await preferences.setString(key, reactionId);
+    }
+  }
 
   @override
   Future<void> saveProfile({

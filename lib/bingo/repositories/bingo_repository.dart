@@ -78,6 +78,21 @@ abstract interface class BingoRepository {
     required String targetId,
   });
 
+  /// Whether [currentUserId] likes the board.
+  Future<bool> loadBoardLike(String boardId);
+
+  Future<void> setBoardLike(String boardId, {required bool liked});
+
+  /// commentId -> [BingoReaction.id] chosen by [currentUserId] on the board.
+  Future<Map<String, String>> loadMyReactions(String boardId);
+
+  /// Sets (or with null removes) the user's single reaction on a comment.
+  Future<void> setCommentReaction(
+    String boardId,
+    String commentId,
+    String? reactionId,
+  );
+
   Future<void> saveProfile({
     required String displayName,
     required String preferredLocale,

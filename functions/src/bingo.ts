@@ -17,6 +17,8 @@ export const BINGO_MAX_COMMENT = 500;
 export const BINGO_MAX_AUTHOR_NAME = 24;
 export const BINGO_REPORT_HIDE_THRESHOLD = 5;
 export const FREE = -1;
+export const BINGO_REACTIONS = ["clap", "party", "laugh", "heart"] as const;
+export type BingoReactionId = (typeof BINGO_REACTIONS)[number];
 
 export interface BingoCellInput {
   text?: string;
@@ -249,4 +251,27 @@ export function validateBingoInput(
     creatorName: trimmedString(data.creatorName, BINGO_MAX_AUTHOR_NAME) || "Guest",
     isPublic: data.isPublic !== false,
   };
+}
+
+function reactionId(value: unknown): BingoReactionId | null {
+  return (BINGO_REACTIONS as readonly unknown[]).includes(value) ?
+    value as BingoReactionId :
+    null;
+}
+
+/**
+ * Count changes for one person's reaction document moving from `before` to
+ * `after` (either may be missing or invalid). Unchanged reactions yield {}.
+ */
+export function reactionDelta(
+  before: unknown,
+  after: unknown,
+): Partial<Record<BingoReactionId, number>> {
+  const from = reactionId(before);
+  const to = reactionId(after);
+  if (from === to) return {};
+  const delta: Partial<Record<BingoReactionId, number>> = {};
+  if (from) delta[from] = -1;
+  if (to) delta[to] = (delta[to] ?? 0) + 1;
+  return delta;
 }

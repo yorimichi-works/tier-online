@@ -122,6 +122,30 @@ class _BingoDetailScreenState extends State<BingoDetailScreen>
     }
   }
 
+  Future<void> _toggleLike(BingoBoard board) async {
+    try {
+      await state.toggleBoardLike(board);
+    } on BingoException catch (error) {
+      if (mounted) _snack(context.bingo.t(error.localizationKey));
+    } on Object {
+      if (mounted) _snack(context.bingo.t('actionFailed'));
+    }
+  }
+
+  Future<void> _react(
+    BingoBoard board,
+    BingoComment comment,
+    BingoReaction reaction,
+  ) async {
+    try {
+      await state.toggleReaction(board, comment, reaction);
+    } on BingoException catch (error) {
+      if (mounted) _snack(context.bingo.t(error.localizationKey));
+    } on Object {
+      if (mounted) _snack(context.bingo.t('actionFailed'));
+    }
+  }
+
   void _tap(BingoBoard board, int position) {
     final result = state.toggleMark(board, position);
     if (result.linesAfter > result.linesBefore) {
@@ -427,7 +451,11 @@ class _BingoDetailScreenState extends State<BingoDetailScreen>
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  _Header(board: board),
+                  _Header(
+                    board: board,
+                    liked: state.isLiked(board.id),
+                    onLike: () => _toggleLike(board),
+                  ),
                   const SizedBox(height: 18),
                   if (wide)
                     Row(
@@ -563,6 +591,8 @@ class _BingoDetailScreenState extends State<BingoDetailScreen>
               comment: comment,
               canDelete: state.canDeleteComment(board, comment),
               reported: state.hasReported('comment', comment.id),
+              myReaction: state.reactionFor(board.id, comment.id),
+              onReact: (reaction) => _react(board, comment, reaction),
               onDelete: () async {
                 if (!await _confirm(
                   strings.t('deleteCommentConfirm'),
@@ -611,9 +641,15 @@ class _Message extends StatelessWidget {
 }
 
 class _Header extends StatelessWidget {
-  const _Header({required this.board});
+  const _Header({
+    required this.board,
+    required this.liked,
+    required this.onLike,
+  });
 
   final BingoBoard board;
+  final bool liked;
+  final VoidCallback onLike;
 
   @override
   Widget build(BuildContext context) {
@@ -690,6 +726,30 @@ class _Header extends StatelessWidget {
               label: strings.count('commentsCount', board.commentCount),
             ),
           ],
+        ),
+        const SizedBox(height: 12),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: OutlinedButton.icon(
+            key: const ValueKey('like-button'),
+            onPressed: onLike,
+            style: OutlinedButton.styleFrom(
+              foregroundColor: liked ? BingoColors.like : BingoColors.ink,
+              backgroundColor: liked ? BingoColors.likeSoft : null,
+              side: BorderSide(
+                color: liked ? BingoColors.like : BingoColors.outline,
+              ),
+              shape: const StadiumBorder(),
+            ),
+            icon: Icon(
+              liked ? Icons.favorite_rounded : Icons.favorite_border_rounded,
+              size: 20,
+            ),
+            label: Text(
+              '${strings.t('likeAction')}  ${board.likeCount}',
+              style: const TextStyle(fontWeight: FontWeight.w800),
+            ),
+          ),
         ),
       ],
     );
@@ -894,6 +954,8 @@ class _CommentTile extends StatelessWidget {
     required this.reported,
     required this.onDelete,
     required this.onReport,
+    required this.onReact,
+    this.myReaction,
   });
 
   final BingoBoard board;
@@ -902,6 +964,8 @@ class _CommentTile extends StatelessWidget {
   final bool reported;
   final VoidCallback onDelete;
   final VoidCallback onReport;
+  final ValueChanged<BingoReaction> onReact;
+  final String? myReaction;
 
   @override
   Widget build(BuildContext context) {
@@ -990,6 +1054,23 @@ class _CommentTile extends StatelessWidget {
                       ),
                     ),
                   ],
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
+                    children: [
+                      for (final reaction in BingoReaction.values)
+                        _ReactionChip(
+                          key: ValueKey(
+                            'reaction-${comment.id}-${reaction.id}',
+                          ),
+                          reaction: reaction,
+                          count: comment.reactionCounts[reaction.id] ?? 0,
+                          selected: myReaction == reaction.id,
+                          onTap: () => onReact(reaction),
+                        ),
+                    ],
+                  ),
                 ],
               ],
             ),
@@ -1147,6 +1228,55 @@ class _StatBox extends StatelessWidget {
             style: const TextStyle(fontSize: 12, color: BingoColors.inkMuted),
           ),
         ],
+      ),
+    ),
+  );
+}
+
+class _ReactionChip extends StatelessWidget {
+  const _ReactionChip({
+    super.key,
+    required this.reaction,
+    required this.count,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final BingoReaction reaction;
+  final int count;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => Material(
+    color: selected ? BingoColors.primarySoft : BingoColors.surface,
+    shape: StadiumBorder(
+      side: BorderSide(
+        color: selected ? BingoColors.primary : BingoColors.outline,
+      ),
+    ),
+    child: InkWell(
+      customBorder: const StadiumBorder(),
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(reaction.emoji, style: const TextStyle(fontSize: 15)),
+            if (count > 0) ...[
+              const SizedBox(width: 4),
+              Text(
+                '$count',
+                style: TextStyle(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w800,
+                  color: selected ? BingoColors.primary : BingoColors.inkMuted,
+                ),
+              ),
+            ],
+          ],
+        ),
       ),
     ),
   );

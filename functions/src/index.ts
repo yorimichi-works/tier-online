@@ -1,6 +1,6 @@
 import {initializeApp} from "firebase-admin/app";
 import {getAuth} from "firebase-admin/auth";
-import {FieldValue, getFirestore} from "firebase-admin/firestore";
+import {FieldPath, FieldValue, getFirestore} from "firebase-admin/firestore";
 import {getStorage} from "firebase-admin/storage";
 import {setGlobalOptions} from "firebase-functions/v2";
 import {onDocumentCreated, onDocumentWritten} from "firebase-functions/v2/firestore";
@@ -19,6 +19,7 @@ import {
   BingoEntryData,
   isValidLayout,
   lineCount,
+  reactionDelta,
   validateBingoInput,
 } from "./bingo";
 import {
@@ -1276,5 +1277,52 @@ export const onBingoReportCreated = onDocumentCreated(
       }
       transaction.update(target, update);
     });
+  },
+);
+
+export const aggregateBingoLikes = onDocumentWritten(
+  "bingos/{bingoId}/likes/{userId}",
+  async (event) => {
+    const created = !event.data?.before.exists && event.data?.after.exists;
+    const deleted = event.data?.before.exists && !event.data?.after.exists;
+    if (!created && !deleted) return;
+    const board = getFirestore().collection("bingos").doc(event.params.bingoId);
+    const snapshot = await board.get();
+    if (!snapshot.exists || snapshot.data()?.deleting === true) return;
+    await board.update({likeCount: FieldValue.increment(created ? 1 : -1)});
+  },
+);
+
+export const countBingoCommentReactions = onDocumentWritten(
+  "bingos/{bingoId}/comments/{commentId}/reactions/{userId}",
+  async (event) => {
+    const delta = reactionDelta(
+      event.data?.before.data()?.reaction,
+      event.data?.after.data()?.reaction,
+    );
+    const entries = Object.entries(delta);
+    if (entries.length === 0) return;
+    const firestore = getFirestore();
+    const board = firestore.collection("bingos").doc(event.params.bingoId);
+    const comment = board.collection("comments").doc(event.params.commentId);
+    const [boardSnapshot, commentSnapshot] = await Promise.all([
+      board.get(),
+      comment.get(),
+    ]);
+    if (!boardSnapshot.exists || boardSnapshot.data()?.deleting === true ||
+      !commentSnapshot.exists) {
+      return;
+    }
+    // Reaction ids are ASCII, so they are safe as nested field names.
+    const [firstReaction, firstChange] = entries[0];
+    const rest = entries.slice(1).flatMap(([reaction, change]) => [
+      new FieldPath("reactionCounts", reaction),
+      FieldValue.increment(change as number),
+    ]);
+    await comment.update(
+      new FieldPath("reactionCounts", firstReaction),
+      FieldValue.increment(firstChange as number),
+      ...rest,
+    );
   },
 );

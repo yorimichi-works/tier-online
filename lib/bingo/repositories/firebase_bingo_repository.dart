@@ -16,6 +16,9 @@ import 'bingo_repository.dart';
 /// - `bingos/{bingoId}/bingoEntries/{uid}`: each participant's card.
 /// - `bingos/{bingoId}/comments/{commentId}`: created by `postBingoComment`.
 /// - `bingos/{bingoId}/reports/{type}_{targetId}_{uid}`: user reports.
+/// - `bingos/{bingoId}/likes/{uid}`: likes (counted by a trigger).
+/// - `bingos/{bingoId}/comments/{commentId}/reactions/{uid}`: one reaction
+///   per person per comment (counted into `reactionCounts` by a trigger).
 class FirebaseBingoRepository implements BingoRepository {
   FirebaseBingoRepository({
     required FirebaseAuth auth,
@@ -294,6 +297,74 @@ class FirebaseBingoRepository implements BingoRepository {
         throw BingoException(BingoFailure.alreadyReported, error);
       }
       rethrow;
+    }
+  }
+
+  @override
+  Future<bool> loadBoardLike(String boardId) async {
+    final snapshot = await _bingos
+        .doc(boardId)
+        .collection('likes')
+        .doc(currentUserId)
+        .get();
+    return snapshot.exists;
+  }
+
+  @override
+  Future<void> setBoardLike(String boardId, {required bool liked}) async {
+    final reference = _bingos
+        .doc(boardId)
+        .collection('likes')
+        .doc(currentUserId);
+    if (liked) {
+      await reference.set({
+        'userId': currentUserId,
+        'bingoId': boardId,
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+    } else {
+      await reference.delete();
+    }
+  }
+
+  @override
+  Future<Map<String, String>> loadMyReactions(String boardId) async {
+    final snapshot = await _firestore
+        .collectionGroup('reactions')
+        .where('userId', isEqualTo: currentUserId)
+        .where('bingoId', isEqualTo: boardId)
+        .limit(200)
+        .get();
+    return {
+      for (final document in snapshot.docs)
+        if (document.data()['commentId'] case final String commentId)
+          if (document.data()['reaction'] case final String reaction)
+            commentId: reaction,
+    };
+  }
+
+  @override
+  Future<void> setCommentReaction(
+    String boardId,
+    String commentId,
+    String? reactionId,
+  ) async {
+    final reference = _bingos
+        .doc(boardId)
+        .collection('comments')
+        .doc(commentId)
+        .collection('reactions')
+        .doc(currentUserId);
+    if (reactionId == null) {
+      await reference.delete();
+    } else {
+      await reference.set({
+        'userId': currentUserId,
+        'bingoId': boardId,
+        'commentId': commentId,
+        'reaction': reactionId,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
     }
   }
 

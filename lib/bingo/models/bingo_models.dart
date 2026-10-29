@@ -103,6 +103,7 @@ class BingoBoard {
     this.markCounts = const {},
     this.appearanceCounts = const {},
     this.commentCount = 0,
+    this.likeCount = 0,
     this.createdAt,
     this.isSample = false,
   });
@@ -145,6 +146,7 @@ class BingoBoard {
   /// cell index -> number of cards that contain it.
   final Map<int, int> appearanceCounts;
   final int commentCount;
+  final int likeCount;
   final DateTime? createdAt;
 
   /// Bundled, local-only example boards.
@@ -157,6 +159,9 @@ class BingoBoard {
   bool get isListed => isPublic && moderationStatus != 'blocked';
   double get bingoRate => participants == 0 ? 0 : bingoCount / participants;
 
+  /// Ranking used for the "Popular" tab.
+  int get popularity => participants + likeCount * 2 + commentCount;
+
   BingoBoard copyWith({
     bool? isPublic,
     String? moderationStatus,
@@ -166,6 +171,7 @@ class BingoBoard {
     Map<int, int>? markCounts,
     Map<int, int>? appearanceCounts,
     int? commentCount,
+    int? likeCount,
     String? creatorId,
   }) => BingoBoard(
     id: id,
@@ -187,6 +193,7 @@ class BingoBoard {
     markCounts: markCounts ?? this.markCounts,
     appearanceCounts: appearanceCounts ?? this.appearanceCounts,
     commentCount: commentCount ?? this.commentCount,
+    likeCount: likeCount ?? this.likeCount,
     createdAt: createdAt,
     isSample: isSample,
   );
@@ -212,6 +219,7 @@ class BingoBoard {
     'markCounts': _intMapToJson(markCounts),
     'appearanceCounts': _intMapToJson(appearanceCounts),
     'commentCount': commentCount,
+    'likeCount': likeCount,
     'createdAt': createdAt?.toIso8601String(),
   };
 
@@ -247,6 +255,7 @@ class BingoBoard {
       markCounts: _intMapFromJson(json['markCounts']),
       appearanceCounts: _intMapFromJson(json['appearanceCounts']),
       commentCount: (json['commentCount'] as num?)?.toInt() ?? 0,
+      likeCount: (json['likeCount'] as num?)?.toInt() ?? 0,
       createdAt:
           createdAt ?? DateTime.tryParse(json['createdAt'] as String? ?? ''),
     );
@@ -386,6 +395,7 @@ class BingoComment {
     required this.createdAt,
     this.result,
     this.hidden = false,
+    this.reactionCounts = const {},
   });
 
   static const maxLength = 500;
@@ -399,6 +409,21 @@ class BingoComment {
   final BingoResultSnapshot? result;
   final bool hidden;
 
+  /// [BingoReaction.id] -> number of people who reacted with it.
+  final Map<String, int> reactionCounts;
+
+  BingoComment copyWith({Map<String, int>? reactionCounts}) => BingoComment(
+    id: id,
+    boardId: boardId,
+    authorId: authorId,
+    authorName: authorName,
+    body: body,
+    createdAt: createdAt,
+    result: result,
+    hidden: hidden,
+    reactionCounts: reactionCounts ?? this.reactionCounts,
+  );
+
   Map<String, Object?> toJson() => {
     'id': id,
     'boardId': boardId,
@@ -408,6 +433,7 @@ class BingoComment {
     'createdAt': createdAt.toIso8601String(),
     if (result != null) 'result': result!.toJson(),
     'hidden': hidden,
+    'reactionCounts': reactionCounts,
   };
 
   static BingoComment fromJson(
@@ -425,7 +451,36 @@ class BingoComment {
         DateTime.now(),
     result: BingoResultSnapshot.fromJson(json['result']),
     hidden: json['hidden'] as bool? ?? false,
+    reactionCounts: {
+      for (final entry
+          in (json['reactionCounts'] as Map?)?.entries ??
+              const <MapEntry<Object?, Object?>>[])
+        if (BingoReaction.byId(entry.key as String?) != null &&
+            entry.value is num &&
+            (entry.value as num) > 0)
+          entry.key as String: (entry.value as num).toInt(),
+    },
   );
+}
+
+/// Reactions people can leave on a comment (one per person per comment).
+/// Stored by id so Firestore field paths stay ASCII.
+enum BingoReaction {
+  clap('clap', '👏'),
+  party('party', '🎉'),
+  laugh('laugh', '😂'),
+  heart('heart', '❤️');
+
+  const BingoReaction(this.id, this.emoji);
+  final String id;
+  final String emoji;
+
+  static BingoReaction? byId(String? id) {
+    for (final reaction in values) {
+      if (reaction.id == id) return reaction;
+    }
+    return null;
+  }
 }
 
 Map<String, int> _intMapToJson(Map<int, int> value) => {

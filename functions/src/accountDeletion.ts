@@ -138,6 +138,9 @@ export async function deleteAccountData(
       firestore.collectionGroup("comments").where("authorId", "==", uid),
     ),
     deleteQueryDocuments(
+      firestore.collectionGroup("reactions").where("userId", "==", uid),
+    ),
+    deleteQueryDocuments(
       firestore.collectionGroup("submissions").where("userId", "==", uid),
     ),
     deleteQueryDocuments(

@@ -60,6 +60,10 @@ class BingoState extends ChangeNotifier {
   final Map<String, BingoEntry> _entries = {};
   final Map<String, List<BingoComment>> _comments = {};
   final Set<String> _reported = {};
+  final Set<String> _likedBoards = {};
+
+  /// boardId -> commentId -> [BingoReaction.id] chosen by this user.
+  final Map<String, Map<String, String>> _myReactions = {};
   final Map<String, Timer> _saveTimers = {};
 
   bool get initialized => _initialized;
@@ -197,7 +201,10 @@ class BingoState extends ChangeNotifier {
     notifyListeners();
   }
 
-  void _clearReactionsForUserSwitch() {}
+  void _clearReactionsForUserSwitch() {
+    _likedBoards.clear();
+    _myReactions.clear();
+  }
 
   /// Email of an existing password account that a Google sign-in collided
   /// with; the account dialog asks for its password to merge both.
@@ -272,6 +279,7 @@ class BingoState extends ChangeNotifier {
       markCounts: cached.markCounts,
       appearanceCounts: cached.appearanceCounts,
       commentCount: cached.commentCount,
+      likeCount: cached.likeCount,
     );
   }
 
@@ -308,10 +316,10 @@ class BingoState extends ChangeNotifier {
               .toList();
     if (sort == BingoSort.popular) {
       filtered.sort((a, b) {
-        final byParticipants = b.participants.compareTo(a.participants);
-        return byParticipants != 0
-            ? byParticipants
-            : b.commentCount.compareTo(a.commentCount);
+        final byPopularity = b.popularity.compareTo(a.popularity);
+        return byPopularity != 0
+            ? byPopularity
+            : b.participants.compareTo(a.participants);
       });
     } else {
       filtered.sort(
@@ -375,12 +383,17 @@ class BingoState extends ChangeNotifier {
         if (candidate.id == boardId) sample = candidate;
       }
       if (sample == null) return null;
-      final aggregated = BingoLogic.aggregate(
-        sample,
-        await _local.loadEntries(boardId),
-      ).copyWith(commentCount: (await _local.loadComments(boardId)).length);
+      final aggregated =
+          BingoLogic.aggregate(
+            sample,
+            await _local.loadEntries(boardId),
+          ).copyWith(
+            commentCount: (await _local.loadComments(boardId)).length,
+            likeCount: await _local.loadBoardLike(boardId) ? 1 : 0,
+          );
       _boards[boardId] = aggregated;
       await _loadEntry(boardId);
+      await _loadLike(boardId);
       return aggregated;
     }
     final board = await _repositoryFor(boardId).loadBoard(boardId);
@@ -391,6 +404,7 @@ class BingoState extends ChangeNotifier {
       _boards[boardId] = board;
       if (board.creatorId == currentUserId) _ownIds.add(boardId);
       await _loadEntry(boardId);
+      await _loadLike(boardId);
     }
     notifyListeners();
     return board;
@@ -543,10 +557,121 @@ class BingoState extends ChangeNotifier {
       List.unmodifiable(_comments[boardId] ?? const <BingoComment>[]);
 
   Future<List<BingoComment>> loadComments(String boardId) async {
-    final comments = await _repositoryFor(boardId).loadComments(boardId);
+    final repository = _repositoryFor(boardId);
+    final comments = await repository.loadComments(boardId);
     _comments[boardId] = comments;
+    try {
+      _myReactions[boardId] = await repository.loadMyReactions(boardId);
+    } on Object catch (error) {
+      _lastError = error;
+    }
     notifyListeners();
     return comments;
+  }
+
+  // ---------------------------------------------------------------- likes
+
+  bool isLiked(String boardId) => _likedBoards.contains(boardId);
+
+  Future<void> _loadLike(String boardId) async {
+    try {
+      if (await _repositoryFor(boardId).loadBoardLike(boardId)) {
+        _likedBoards.add(boardId);
+      } else {
+        _likedBoards.remove(boardId);
+      }
+    } on Object catch (error) {
+      _lastError = error;
+    }
+  }
+
+  /// Optimistic like toggle; the server trigger keeps `likeCount` exact.
+  Future<void> toggleBoardLike(BingoBoard board) async {
+    _assertCanPost();
+    final liked = !isLiked(board.id);
+    void apply(bool value) {
+      final cached = cachedBoard(board.id) ?? board;
+      if (value) {
+        _likedBoards.add(board.id);
+      } else {
+        _likedBoards.remove(board.id);
+      }
+      _boards[board.id] = cached.copyWith(
+        likeCount: (cached.likeCount + (value ? 1 : -1)).clamp(0, 1 << 30),
+      );
+      notifyListeners();
+    }
+
+    apply(liked);
+    try {
+      await _repositoryFor(board.id).setBoardLike(board.id, liked: liked);
+    } on Object {
+      apply(!liked);
+      rethrow;
+    }
+  }
+
+  // ---------------------------------------------------------------- reactions
+
+  String? reactionFor(String boardId, String commentId) =>
+      _myReactions[boardId]?[commentId];
+
+  /// Picks [reaction] on a comment, or removes it when already chosen. One
+  /// reaction per person per comment, like a poll.
+  Future<void> toggleReaction(
+    BingoBoard board,
+    BingoComment comment,
+    BingoReaction reaction,
+  ) async {
+    _assertCanPost();
+    final previous = reactionFor(board.id, comment.id);
+    final next = previous == reaction.id ? null : reaction.id;
+    void apply(String? from, String? to) {
+      final mine = _myReactions.putIfAbsent(board.id, () => {});
+      if (to == null) {
+        mine.remove(comment.id);
+      } else {
+        mine[comment.id] = to;
+      }
+      _comments[board.id] = [
+        for (final existing in commentsFor(board.id))
+          if (existing.id != comment.id)
+            existing
+          else
+            existing.copyWith(
+              reactionCounts: _shiftReaction(existing.reactionCounts, from, to),
+            ),
+      ];
+      notifyListeners();
+    }
+
+    apply(previous, next);
+    try {
+      await _repositoryFor(
+        board.id,
+      ).setCommentReaction(board.id, comment.id, next);
+    } on Object {
+      apply(next, previous);
+      rethrow;
+    }
+  }
+
+  static Map<String, int> _shiftReaction(
+    Map<String, int> counts,
+    String? from,
+    String? to,
+  ) {
+    final result = {...counts};
+    if (from != null) {
+      final value = (result[from] ?? 0) - 1;
+      if (value > 0) {
+        result[from] = value;
+      } else {
+        result.remove(from);
+      }
+    }
+    if (to != null) result[to] = (result[to] ?? 0) + 1;
+    return result;
   }
 
   Future<BingoComment> postComment(

@@ -19,6 +19,8 @@ abstract final class BingoColors {
   static const blueSoft = Color(0xFFE6EEFF);
   static const marked = Color(0xFFFF7A50);
   static const line = Color(0xFFFFB400);
+  static const like = Color(0xFFE5326B);
+  static const likeSoft = Color(0xFFFFE6EE);
 }
 
 ThemeData buildBingoTheme() {

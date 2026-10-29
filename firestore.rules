@@ -98,6 +98,11 @@ service cloud.firestore {
       allow read: if signedIn() && resource.data.userId == request.auth.uid;
     }
 
+    // Collection-group read of the caller's own reactions on one board.
+    match /{path=**}/reactions/{reactionId} {
+      allow read: if signedIn() && resource.data.userId == request.auth.uid;
+    }
+
     match /bingos/{bingoId} {
       allow read: if resource.data.get('listed', false) == true ||
         (signedIn() && resource.data.creatorId == request.auth.uid);
@@ -132,12 +137,44 @@ service cloud.firestore {
         allow delete: if signedIn() && request.auth.uid == userId;
       }
 
+      // Likes are counted into bingos/{id}.likeCount by aggregateBingoLikes.
+      match /likes/{userId} {
+        allow read: if signedIn() && request.auth.uid == userId;
+        allow create: if signedIn() &&
+          request.auth.uid == userId &&
+          canViewBingo(bingoId) &&
+          emailVerifiedOrExempt() &&
+          request.resource.data.keys().hasOnly(['userId', 'bingoId', 'createdAt']) &&
+          request.resource.data.userId == request.auth.uid &&
+          request.resource.data.bingoId == bingoId;
+        allow delete: if signedIn() && request.auth.uid == userId;
+        allow update: if false;
+      }
+
       match /comments/{commentId} {
         allow read: if canViewBingo(bingoId);
         // Created by postBingoComment so the attached result is server-made.
         allow create, update: if false;
         allow delete: if signedIn() &&
           (resource.data.authorId == request.auth.uid || ownsBingo(bingoId));
+
+        // One reaction per person per comment; counted into
+        // comments/{id}.reactionCounts by countBingoCommentReactions.
+        match /reactions/{userId} {
+          allow read: if signedIn() && request.auth.uid == userId;
+          allow create, update: if signedIn() &&
+            request.auth.uid == userId &&
+            canViewBingo(bingoId) &&
+            emailVerifiedOrExempt() &&
+            exists(/databases/$(database)/documents/bingos/$(bingoId)/comments/$(commentId)) &&
+            request.resource.data.keys().hasOnly(
+              ['userId', 'bingoId', 'commentId', 'reaction', 'updatedAt']) &&
+            request.resource.data.userId == request.auth.uid &&
+            request.resource.data.bingoId == bingoId &&
+            request.resource.data.commentId == commentId &&
+            request.resource.data.reaction in ['clap', 'party', 'laugh', 'heart'];
+          allow delete: if signedIn() && request.auth.uid == userId;
+        }
       }
 
       match /reports/{reportId} {
