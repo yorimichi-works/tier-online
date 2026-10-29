@@ -414,6 +414,17 @@ class BingoState extends ChangeNotifier {
       userName: authorName,
       firstBingoAt: entry.firstBingoAt ?? (after > 0 ? DateTime.now() : null),
     );
+    // Reflect reaching (or losing) BINGO in the header right away; the
+    // server/local aggregation replaces this on the next load.
+    if ((before > 0) != (after > 0)) {
+      final cached = cachedBoard(board.id) ?? board;
+      _boards[board.id] = cached.copyWith(
+        bingoCount: (cached.bingoCount + (after > 0 ? 1 : -1)).clamp(
+          0,
+          cached.participants,
+        ),
+      );
+    }
     _scheduleEntrySave(board.id);
     notifyListeners();
     return (linesBefore: before, linesAfter: after);
@@ -422,6 +433,12 @@ class BingoState extends ChangeNotifier {
   Future<void> resetMarks(BingoBoard board) async {
     final entry = _entries[board.id];
     if (entry == null) return;
+    if (BingoLogic.lineCount(board.size, entry.layout, entry.marked) > 0) {
+      final cached = cachedBoard(board.id) ?? board;
+      _boards[board.id] = cached.copyWith(
+        bingoCount: (cached.bingoCount - 1).clamp(0, cached.participants),
+      );
+    }
     _entries[board.id] = entry.copyWith(marked: {}, clearFirstBingo: true);
     notifyListeners();
     await flushEntry(board.id);

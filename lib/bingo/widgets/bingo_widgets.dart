@@ -38,14 +38,42 @@ class BingoFrame extends StatelessWidget {
 }
 
 /// Renders `data:` (unpublished uploads), bundled assets and network images.
-class BingoImage extends StatelessWidget {
+class BingoImage extends StatefulWidget {
   const BingoImage({super.key, required this.url, this.fit = BoxFit.cover});
 
   final String url;
   final BoxFit fit;
 
   @override
+  State<BingoImage> createState() => _BingoImageState();
+}
+
+class _BingoImageState extends State<BingoImage> {
+  static const _maxRetries = 2;
+  int _attempt = 0;
+
+  @override
+  void didUpdateWidget(BingoImage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.url != widget.url) _attempt = 0;
+  }
+
+  /// Flutter caches a failed network image, so a single dropped request
+  /// would leave the square broken until reload. Evict and retry a few times.
+  void _retryLater() {
+    if (_attempt >= _maxRetries) return;
+    final attempt = _attempt;
+    Future<void>.delayed(Duration(seconds: 1 + attempt * 2), () async {
+      if (!mounted || _attempt != attempt) return;
+      await NetworkImage(widget.url).evict();
+      if (mounted) setState(() => _attempt++);
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final url = widget.url;
+    final fit = widget.fit;
     Widget fallback(BuildContext context, Object error, StackTrace? stack) =>
         const ColoredBox(
           color: BingoColors.surfaceStrong,
@@ -70,9 +98,13 @@ class BingoImage extends StatelessWidget {
     }
     return Image.network(
       url,
+      key: ValueKey('$url#$_attempt'),
       fit: fit,
       gaplessPlayback: true,
-      errorBuilder: fallback,
+      errorBuilder: (context, error, stack) {
+        _retryLater();
+        return fallback(context, error, stack);
+      },
       loadingBuilder: (context, child, progress) => progress == null
           ? child
           : const ColoredBox(color: BingoColors.surface),

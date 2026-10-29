@@ -63,6 +63,7 @@ void main() {
     await _completeFirstLine(tester, state, 'sample-travel');
     await tester.pumpAndSettle();
     expect(find.text('BINGO!'), findsOneWidget);
+    expect(state.cachedBoard('sample-travel')!.bingoCount, 1);
 
     await tester.tap(find.byKey(const ValueKey('celebrate-share')));
     await tester.pumpAndSettle();
