@@ -78,6 +78,81 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // ----- Bingo Online (lib/bingo) -----
+    function bingoDoc(bingoId) {
+      return get(/databases/$(database)/documents/bingos/$(bingoId)).data;
+    }
+
+    function canViewBingo(bingoId) {
+      let bingo = bingoDoc(bingoId);
+      return bingo.get('listed', false) == true ||
+        (signedIn() && bingo.creatorId == request.auth.uid);
+    }
+
+    function ownsBingo(bingoId) {
+      return signedIn() && bingoDoc(bingoId).creatorId == request.auth.uid;
+    }
+
+    // Collection-group read for "My Bingo" (the participant's own cards).
+    match /{path=**}/bingoEntries/{entryId} {
+      allow read: if signedIn() && resource.data.userId == request.auth.uid;
+    }
+
+    match /bingos/{bingoId} {
+      allow read: if resource.data.get('listed', false) == true ||
+        (signedIn() && resource.data.creatorId == request.auth.uid);
+      // Publishing goes through publishBingo (moderation + rate limits) and
+      // deletion through deleteBingo (recursive), never from the client.
+      allow create, delete: if false;
+      // The owner may only switch visibility. `listed` must stay consistent
+      // with the server-owned moderation status.
+      allow update: if signedIn() &&
+        resource.data.creatorId == request.auth.uid &&
+        request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['isPublic', 'listed', 'updatedAt']) &&
+        request.resource.data.isPublic is bool &&
+        request.resource.data.listed ==
+          (request.resource.data.isPublic &&
+           resource.data.get('moderationStatus', 'approved') != 'blocked');
+
+      match /bingoEntries/{userId} {
+        allow read: if canViewBingo(bingoId);
+        allow create, update: if signedIn() &&
+          request.auth.uid == userId &&
+          canViewBingo(bingoId) &&
+          request.resource.data.userId == request.auth.uid &&
+          request.resource.data.keys().hasOnly(
+            ['userId', 'userName', 'layout', 'marked', 'firstBingoAt', 'updatedAt']) &&
+          request.resource.data.userName is string &&
+          request.resource.data.userName.size() <= 24 &&
+          request.resource.data.layout is list &&
+          request.resource.data.layout.size() == bingoDoc(bingoId).size * bingoDoc(bingoId).size &&
+          request.resource.data.marked is list &&
+          request.resource.data.marked.size() <= 25;
+        allow delete: if signedIn() && request.auth.uid == userId;
+      }
+
+      match /comments/{commentId} {
+        allow read: if canViewBingo(bingoId);
+        // Created by postBingoComment so the attached result is server-made.
+        allow create, update: if false;
+        allow delete: if signedIn() &&
+          (resource.data.authorId == request.auth.uid || ownsBingo(bingoId));
+      }
+
+      match /reports/{reportId} {
+        allow create: if signedIn() &&
+          canViewBingo(bingoId) &&
+          emailVerifiedOrExempt() &&
+          request.resource.data.reporterUserId == request.auth.uid &&
+          request.resource.data.targetType in ['bingo', 'comment'] &&
+          request.resource.data.targetId is string &&
+          reportId == request.resource.data.targetType + '_' +
+            request.resource.data.targetId + '_' + request.auth.uid;
+        allow read, update, delete: if false;
+      }
+    }
+
     match /topics/{topicId} {
       allow read: if resource.data.get('isPublic', true) == true ||
         (signedIn() && resource.data.creatorId == request.auth.uid);

@@ -39,7 +39,32 @@
         {"fieldPath": "translationStatus", "order": "ASCENDING"},
         {"fieldPath": "processingStartedAt", "order": "ASCENDING"}
       ]
+    },
+    {
+      "collectionGroup": "bingos",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {"fieldPath": "listed", "order": "ASCENDING"},
+        {"fieldPath": "createdAt", "order": "DESCENDING"}
+      ]
     }
   ],
-  "fieldOverrides": []
+  "fieldOverrides": [
+    {
+      "collectionGroup": "bingoEntries",
+      "fieldPath": "userId",
+      "indexes": [
+        {"order": "ASCENDING", "queryScope": "COLLECTION"},
+        {"order": "ASCENDING", "queryScope": "COLLECTION_GROUP"}
+      ]
+    },
+    {
+      "collectionGroup": "comments",
+      "fieldPath": "authorId",
+      "indexes": [
+        {"order": "ASCENDING", "queryScope": "COLLECTION"},
+        {"order": "ASCENDING", "queryScope": "COLLECTION_GROUP"}
+      ]
+    }
+  ]
 }

@@ -55,3 +55,7 @@ playwright/.cache/
 
 # Semi-automatic translation batches contain production UGC.
 tmp/translations/
+
+# Bingo rules test tooling
+scripts/bingo_rules_test/node_modules/
+scripts/bingo_rules_test/*.rules

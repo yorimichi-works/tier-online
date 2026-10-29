@@ -88,6 +88,20 @@ async function deleteOwnedTopics(
   }
 }
 
+async function deleteOwnedBingos(
+  firestore: Firestore,
+  uid: string,
+): Promise<void> {
+  const snapshot = await firestore.collection("bingos")
+    .where("creatorId", "==", uid)
+    .get();
+  for (const bingo of snapshot.docs) {
+    // Bingo triggers skip boards marked as deleting (same as topics).
+    await bingo.ref.set({deleting: true, listed: false}, {merge: true});
+    await firestore.recursiveDelete(bingo.ref);
+  }
+}
+
 async function deleteTalkData(firestore: Firestore, uid: string): Promise<void> {
   const [authored, containingReplies] = await Promise.all([
     firestore.collectionGroup("talks").where("authorUserId", "==", uid).get(),
@@ -115,7 +129,14 @@ export async function deleteAccountData(
   uid: string,
 ): Promise<void> {
   await deleteOwnedTopics(firestore, storage, uid);
+  await deleteOwnedBingos(firestore, uid);
   await Promise.all([
+    deleteQueryDocuments(
+      firestore.collectionGroup("bingoEntries").where("userId", "==", uid),
+    ),
+    deleteQueryDocuments(
+      firestore.collectionGroup("comments").where("authorId", "==", uid),
+    ),
     deleteQueryDocuments(
       firestore.collectionGroup("submissions").where("userId", "==", uid),
     ),

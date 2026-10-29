@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <!-- Bingo Online shell. scripts/build_bingo_web.sh copies this over the
+       Flutter build output and fills in the base href. -->
+  <base href="$FLUTTER_BASE_HREF">
+
+  <meta charset="UTF-8">
+  <meta content="IE=Edge" http-equiv="X-UA-Compatible">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="description" content="ビンゴを作って公開、みんなで参加。結果をコメントでシェアしよう。">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="ビンゴオンライン｜ビンゴを作って、みんなで参加">
+  <meta property="og:description" content="ビンゴを作って公開、みんなで参加。結果をコメントでシェアしよう。">
+  <meta name="twitter:card" content="summary">
+  <meta name="theme-color" content="#FFFFFF">
+
+  <link rel="preload" href="assets/assets/fonts/NotoSansJP-TierSubset.ttf" as="font" type="font/ttf" crossorigin>
+  <link rel="preload" href="assets/assets/fonts/NotoSansKR-TierSubset.ttf" as="font" type="font/ttf" crossorigin>
+
+  <style>
+    @font-face {
+      font-family: "TierNotoSansJP";
+      src: url("assets/assets/fonts/NotoSansJP-TierSubset.ttf") format("truetype");
+      font-display: swap;
+      font-weight: 500;
+    }
+
+    @font-face {
+      font-family: "TierNotoSansKR";
+      src: url("assets/assets/fonts/NotoSansKR-TierSubset.ttf") format("truetype");
+      font-display: swap;
+      font-weight: 500;
+    }
+
+    html,
+    body {
+      height: 100%;
+      margin: 0;
+      background: #FFFFFF;
+      font-family: "TierNotoSansJP", "TierNotoSansKR", "Noto Sans", "Noto Sans TC",
+        "PingFang TC", "Microsoft JhengHei", "Yu Gothic", YuGothic, Meiryo,
+        "Apple SD Gothic Neo", "Malgun Gothic", Arial, sans-serif;
+    }
+
+    #app-loading {
+      align-items: center;
+      background: #FFFFFF;
+      color: #1B1C22;
+      display: flex;
+      inset: 0;
+      justify-content: center;
+      position: fixed;
+      z-index: 2147483647;
+    }
+
+    #app-loading[hidden] { display: none; }
+
+    .app-loading-content {
+      align-items: center;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    .app-loading-grid {
+      display: grid;
+      gap: 4px;
+      grid-template-columns: repeat(3, 14px);
+    }
+
+    .app-loading-grid span {
+      animation: loading-pop .9s ease-in-out infinite alternate;
+      background: #EDEFF4;
+      border-radius: 4px;
+      height: 14px;
+    }
+
+    .app-loading-grid span:nth-child(4n + 1) { animation-delay: .15s; background: #F2552C; }
+    .app-loading-grid span:nth-child(3) { background: #FFB400; }
+
+    .app-loading-label {
+      font-family: Arial, "PingFang TC", "Microsoft JhengHei", "Yu Gothic", Meiryo,
+        "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+      font-size: 16px;
+      font-weight: 700;
+    }
+
+    @keyframes loading-pop {
+      from { opacity: .5; transform: scale(.85); }
+      to { opacity: 1; transform: scale(1); }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .app-loading-grid span { animation: none; }
+    }
+  </style>
+
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Bingo Online">
+  <link rel="apple-touch-icon" href="icons/Icon-192.png">
+  <link rel="icon" type="image/png" href="favicon.png"/>
+
+  <title>ビンゴオンライン｜ビンゴを作って、みんなで参加</title>
+  <link rel="manifest" href="manifest.json">
+  <script>
+    (() => {
+      // Mirror of the Dart locale rules (lib/domain/internationalization.dart),
+      // needed before Flutter starts. Keep in sync with web/index.html.
+      const supportedLocales = Object.freeze(['ja', 'ko', 'en', 'zh-tw', 'pt-br']);
+      const hreflangByLocale = Object.freeze({
+        ja: 'ja', ko: 'ko', en: 'en', 'zh-tw': 'zh-Hant-TW', 'pt-br': 'pt-BR'
+      });
+      const pathSegment = location.pathname.split('/')[1];
+      const pathLocale = supportedLocales.includes(pathSegment) ? pathSegment : null;
+      const browserLocale = navigator.language || 'ja-JP';
+      const localeParts = browserLocale.replace('_', '-').split('-');
+      const language = localeParts[0].toLowerCase();
+      const region = localeParts.map((part) => part.toUpperCase()).find(
+        (part) => ['JP', 'KR', 'TW', 'HK', 'BR'].includes(part)
+      ) || '';
+      const traditionalChinese = localeParts.some((part) => part.toLowerCase() === 'hant');
+      const detectedLocale = region === 'KR' || language === 'ko'
+        ? 'ko'
+        : region === 'JP' || language === 'ja'
+          ? 'ja'
+          : region === 'TW' || region === 'HK' || (language === 'zh' && traditionalChinese)
+            ? 'zh-tw'
+            : region === 'BR' || language === 'pt'
+              ? 'pt-br'
+              : 'en';
+      const locale = pathLocale || detectedLocale;
+      const meta = {
+        ja: {
+          name: 'ビンゴオンライン',
+          title: 'ビンゴオンライン｜ビンゴを作って、みんなで参加',
+          description: 'ビンゴを作って公開、みんなで参加。結果をコメントでシェアしよう。',
+          ogLocale: 'ja_JP'
+        },
+        ko: {
+          name: '빙고 온라인',
+          title: '빙고 온라인 | 빙고를 만들고 다 함께 참여',
+          description: '빙고를 만들어 공개하고 다 함께 참여해 보세요. 결과는 댓글로 공유할 수 있어요.',
+          ogLocale: 'ko_KR'
+        },
+        'zh-tw': {
+          name: '賓果線上版',
+          title: '賓果線上版｜製作賓果，大家一起參加',
+          description: '製作並公開賓果，大家一起參加，還能在留言分享結果。',
+          ogLocale: 'zh_TW'
+        },
+        'pt-br': {
+          name: 'Bingo Online',
+          title: 'Bingo Online | Crie um bingo e jogue com todos',
+          description: 'Crie e publique bingos, jogue com todo mundo e compartilhe o resultado nos comentários.',
+          ogLocale: 'pt_BR'
+        },
+        en: {
+          name: 'Bingo Online',
+          title: 'Bingo Online | Make a bingo card and play together',
+          description: 'Create and publish bingo cards, play together and share your result in the comments.',
+          ogLocale: 'en_US'
+        }
+      }[locale];
+      document.documentElement.lang = locale === 'zh-tw' ? 'zh-TW' : locale === 'pt-br' ? 'pt-BR' : locale;
+      document.title = meta.title;
+      document.querySelector('meta[name="description"]').content = meta.description;
+      document.querySelector('meta[property="og:title"]').content = meta.title;
+      document.querySelector('meta[property="og:description"]').content = meta.description;
+      const ogLocale = document.createElement('meta');
+      ogLocale.setAttribute('property', 'og:locale');
+      ogLocale.content = meta.ogLocale;
+      document.head.appendChild(ogLocale);
+      window.__bingoServiceName = meta.name;
+      if (pathLocale && location.pathname.split('/').filter(Boolean).length === 1) {
+        for (const code of supportedLocales) {
+          const link = document.createElement('link');
+          link.rel = 'alternate';
+          link.hreflang = hreflangByLocale[code];
+          link.href = `${location.origin}/${code}/`;
+          document.head.appendChild(link);
+        }
+      }
+    })();
+  </script>
+</head>
+<body>
+  <div id="app-loading" role="status" aria-live="polite">
+    <div class="app-loading-content">
+      <div class="app-loading-grid" aria-hidden="true">
+        <span></span><span></span><span></span>
+        <span></span><span></span><span></span>
+        <span></span><span></span><span></span>
+      </div>
+      <div class="app-loading-label" id="app-loading-label">Bingo Online</div>
+    </div>
+  </div>
+  <script>
+    document.getElementById('app-loading-label').textContent =
+      window.__bingoServiceName || 'Bingo Online';
+    window.addEventListener('flutter-first-frame', () => {
+      window.setTimeout(() => {
+        requestAnimationFrame(() => {
+          document.getElementById('app-loading')?.setAttribute('hidden', '');
+        });
+      }, 300);
+    }, { once: true });
+  </script>
+  <script src="flutter_bootstrap.js" async></script>
+</body>
+</html>

@@ -2,6 +2,17 @@
 
 「みんなで決める、みんなのTier。」をコンセプトにした Flutter Web のMVPです。
 
+## ビンゴオンライン
+
+同じプロジェクトに、ビンゴを作って公開・参加し、結果をコメントで公開できる
+「ビンゴオンライン」(`lib/bingo/`, エントリポイント `lib/main_bingo.dart`) を同居させています。
+画像アップロードやAppleのジャケット画像でマスを作れます。詳細は
+[`docs/bingo_online.md`](docs/bingo_online.md) を参照してください。
+
+```sh
+flutter run -d chrome -t lib/main_bingo.dart
+```
+
 ## 多言語・地域対応
 
 対応言語は日本語 (`ja`)、韓国語 (`ko`)、英語 (`en`)、繁体字中国語 (`zh-tw`)、ブラジルポルトガル語 (`pt-br`) です。Web URLは

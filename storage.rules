@@ -10,5 +10,18 @@ service firebase.storage {
         request.resource.size < 5 * 1024 * 1024 &&
         request.resource.contentType.matches('image/.*');
     }
+
+    // Bingo Online cell images (600px JPEG, ~50-150KB after client-side
+    // resizing). Guests can upload too, with a tighter size cap, because
+    // bingo has no registration flow yet; publishBingo only accepts URLs
+    // from the uploader's own folder.
+    match /users/{userId}/bingos/{bingoId}/cells/{fileName} {
+      allow read: if true;
+      allow write: if request.auth != null &&
+        request.auth.uid == userId &&
+        fileName.matches('[0-9]{1,2}[.]jpg') &&
+        request.resource.size < 1024 * 1024 &&
+        request.resource.contentType.matches('image/.*');
+    }
   }
 }

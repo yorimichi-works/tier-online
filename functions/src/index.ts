@@ -3,7 +3,7 @@ import {getAuth} from "firebase-admin/auth";
 import {FieldValue, getFirestore} from "firebase-admin/firestore";
 import {getStorage} from "firebase-admin/storage";
 import {setGlobalOptions} from "firebase-functions/v2";
-import {onDocumentWritten} from "firebase-functions/v2/firestore";
+import {onDocumentCreated, onDocumentWritten} from "firebase-functions/v2/firestore";
 import {HttpsError, onCall} from "firebase-functions/v2/https";
 import {defineBoolean} from "firebase-functions/params";
 import {createHash, randomUUID} from "node:crypto";
@@ -11,6 +11,16 @@ import {createHash, randomUUID} from "node:crypto";
 import {assertAdmin, loadNgWordConfig, updateNgWordConfigForAdmin} from "./adminConfig";
 import {deleteAccountData, deleteSharedImagesForTopic} from "./accountDeletion";
 import {aggregateTier, Placements} from "./aggregation";
+import {
+  aggregateBingo,
+  BINGO_MAX_AUTHOR_NAME,
+  BINGO_MAX_COMMENT,
+  BINGO_REPORT_HIDE_THRESHOLD,
+  BingoEntryData,
+  isValidLayout,
+  lineCount,
+  validateBingoInput,
+} from "./bingo";
 import {
   computeDailyCreateUpdate,
   confirmAdBonus,
@@ -25,6 +35,7 @@ import {assertTierCreationAllowed} from "./tierCreationPolicy";
 import {
   firestoreLanguage,
   normalizeLocale,
+  SUPPORTED_REGION_CODES,
   wikipediaLanguage,
 } from "./internationalization";
 import {
@@ -991,3 +1002,279 @@ export const confirmCreateAdBonus = onCall(callableOptions, async (request) => {
 // 要求するため撤去した。何もしない関数のためにその依存を追加する価値がなく、
 // 将来サーバー側の削除対象データ(例: 下書きのFirestore同期)が生まれた場合は
 // v2の識別トリガーが使えないか改めて検討し、必要ならApp Engineの導入を検討する。
+
+// ---------------------------------------------------------------------------
+// Bingo Online (lib/bingo). Boards live in `bingos/{bingoId}` with
+// `bingoEntries`, `comments` and `reports` subcollections. Pure rules are in
+// bingo.ts; moderation, NG words and rate limits are shared with Tier.
+// ---------------------------------------------------------------------------
+
+const BINGO_ID_PATTERN = /^[A-Za-z0-9_-]{6,64}$/;
+
+function assertBingoCaller(request: {
+  auth?: {uid: string; token: Record<string, unknown>};
+}): {uid: string; anonymous: boolean} {
+  if (!request.auth) {
+    throw new HttpsError("unauthenticated", "ログインが必要です");
+  }
+  const token = request.auth.token as {
+    firebase?: {sign_in_provider?: string};
+    email_verified?: boolean;
+  };
+  if (requiresUnverifiedEmailBlock(token)) {
+    throw new HttpsError(
+      "permission-denied",
+      "メールアドレスの確認が完了していません",
+    );
+  }
+  return {uid: request.auth.uid, anonymous: isAnonymousRequest(token)};
+}
+
+function bingoIdFrom(data: Record<string, unknown>): string {
+  const bingoId = data.bingoId;
+  if (typeof bingoId !== "string" || !BINGO_ID_PATTERN.test(bingoId) ||
+    bingoId.startsWith("sample-")) {
+    throw new HttpsError("invalid-argument", "bingoIdが不正です");
+  }
+  return bingoId;
+}
+
+export const publishBingo = onCall(callableOptions, async (request) => {
+  const {uid, anonymous} = assertBingoCaller(request);
+  const data = (request.data ?? {}) as Record<string, unknown>;
+  const bingoId = bingoIdFrom(data);
+  const firestore = getFirestore();
+  const input = validateBingoInput(data, {
+    uid,
+    bingoId,
+    bucket: getStorage().bucket().name,
+  });
+
+  const moderation = moderateText({
+    title: input.title,
+    description: input.description,
+    tags: input.tags.join(" "),
+    cells: input.cells.map((cell) => cell.text ?? "").join(" "),
+    creatorName: input.creatorName,
+  }, await loadNgWordConfig(firestore));
+  if (moderation.status === "blocked") {
+    throw new HttpsError(
+      "failed-precondition",
+      "不適切な内容が含まれているため公開できません",
+    );
+  }
+
+  const limits = await loadLimits(firestore);
+  const limit = (anonymous ? limits.anonymous : limits.authenticated).bingoPublish;
+  const reference = firestore.collection("bingos").doc(bingoId);
+  const rateLimitReference = rateLimitRef(firestore, uid);
+  const targetRegion = (SUPPORTED_REGION_CODES as readonly string[])
+    .includes(String(data.targetRegion)) ? String(data.targetRegion) : "GLOBAL";
+
+  await firestore.runTransaction(async (transaction) => {
+    const existing = await transaction.get(reference);
+    if (existing.exists) {
+      // Cards reference pool indices, so a published board is immutable.
+      throw new HttpsError("already-exists", "このビンゴは既に公開されています");
+    }
+    const rateLimitSnapshot = await transaction.get(rateLimitReference);
+    transaction.set(
+      rateLimitReference,
+      computeRateLimitUpdate(rateLimitSnapshot.data() ?? {}, limit, "bingoPublish"),
+      {merge: true},
+    );
+    transaction.set(reference, {
+      ...input,
+      creatorId: uid,
+      contentLanguage: normalizeLocale(data.sourceLanguage ?? data.contentLanguage),
+      sourceLanguage: firestoreLanguage(data.sourceLanguage ?? data.contentLanguage),
+      targetRegion,
+      listed: input.isPublic,
+      moderationStatus: moderation.status,
+      moderationReasons: moderation.reasons,
+      participants: 0,
+      bingoCount: 0,
+      markCounts: {},
+      appearanceCounts: {},
+      commentCount: 0,
+      reportCount: 0,
+      createdByAnonymous: anonymous,
+      createdAt: FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+  });
+  return {moderationStatus: moderation.status};
+});
+
+export const deleteBingo = onCall(callableOptions, async (request) => {
+  if (!request.auth) {
+    throw new HttpsError("unauthenticated", "ログインが必要です");
+  }
+  const uid = request.auth.uid;
+  const bingoId = bingoIdFrom((request.data ?? {}) as Record<string, unknown>);
+  const firestore = getFirestore();
+  const reference = firestore.collection("bingos").doc(bingoId);
+  const snapshot = await reference.get();
+  if (snapshot.exists && snapshot.data()?.creatorId !== uid) {
+    throw new HttpsError("permission-denied", "作成者だけが削除できます");
+  }
+  if (snapshot.exists) {
+    await reference.set({deleting: true, listed: false}, {merge: true});
+    await firestore.recursiveDelete(reference);
+  }
+  try {
+    await getStorage().bucket().deleteFiles({
+      prefix: `users/${uid}/bingos/${bingoId}/`,
+    });
+  } catch (error) {
+    console.error("deleteBingo: failed to clean up storage files", error);
+  }
+  return {ok: true};
+});
+
+export const postBingoComment = onCall(callableOptions, async (request) => {
+  const {uid, anonymous} = assertBingoCaller(request);
+  const data = (request.data ?? {}) as Record<string, unknown>;
+  const bingoId = bingoIdFrom(data);
+  const body = typeof data.body === "string" ? data.body.normalize("NFC").trim() : "";
+  if (body.length > BINGO_MAX_COMMENT) {
+    throw new HttpsError("invalid-argument", "コメントが長すぎます");
+  }
+  const authorName = (typeof data.authorName === "string" ?
+    data.authorName.trim().slice(0, BINGO_MAX_AUTHOR_NAME) : "") || "Guest";
+  const attachResult = data.attachResult === true;
+  if (body.length === 0 && !attachResult) {
+    throw new HttpsError("invalid-argument", "コメントが空です");
+  }
+
+  const firestore = getFirestore();
+  const board = firestore.collection("bingos").doc(bingoId);
+  const boardSnapshot = await board.get();
+  const boardData = boardSnapshot.data();
+  if (!boardData || boardData.deleting === true ||
+    (boardData.listed !== true && boardData.creatorId !== uid)) {
+    throw new HttpsError("not-found", "ビンゴが見つかりません");
+  }
+
+  const moderation = moderateText({body, authorName}, await loadNgWordConfig(firestore));
+  if (moderation.status === "blocked") {
+    throw new HttpsError(
+      "failed-precondition",
+      "不適切な内容が含まれているため投稿できません",
+    );
+  }
+
+  // The result is copied from the stored card on the server, so a comment can
+  // only show the author's real marks.
+  let result: Record<string, unknown> | null = null;
+  if (attachResult) {
+    const entry = (await board.collection("bingoEntries").doc(uid).get()).data();
+    const size = Number(boardData.size);
+    const freeCenter = boardData.freeCenter !== false;
+    const cellCount = Array.isArray(boardData.cells) ? boardData.cells.length : 0;
+    if (entry && isValidLayout(size, freeCenter, cellCount, entry.layout)) {
+      const marked = (Array.isArray(entry.marked) ? entry.marked : [])
+        .filter((value: unknown) => Number.isInteger(value) &&
+          (value as number) >= 0 && (value as number) < size * size);
+      result = {
+        size,
+        layout: entry.layout,
+        marked,
+        lines: lineCount(size, entry.layout, marked),
+      };
+    }
+  }
+
+  const limits = await loadLimits(firestore);
+  const limit = (anonymous ? limits.anonymous : limits.authenticated).bingoComment;
+  const rateLimitReference = rateLimitRef(firestore, uid);
+  const comment = board.collection("comments").doc();
+  await firestore.runTransaction(async (transaction) => {
+    const rateLimitSnapshot = await transaction.get(rateLimitReference);
+    transaction.set(
+      rateLimitReference,
+      computeRateLimitUpdate(rateLimitSnapshot.data() ?? {}, limit, "bingoComment"),
+      {merge: true},
+    );
+    transaction.set(comment, {
+      authorId: uid,
+      authorName,
+      body,
+      ...(result ? {result} : {}),
+      moderationStatus: moderation.status,
+      moderationReasons: moderation.reasons,
+      hidden: false,
+      reportCount: 0,
+      createdAt: FieldValue.serverTimestamp(),
+    });
+  });
+  return {id: comment.id, result};
+});
+
+export const aggregateBingoEntries = onDocumentWritten(
+  "bingos/{bingoId}/bingoEntries/{userId}",
+  async (event) => {
+    const firestore = getFirestore();
+    const board = firestore.collection("bingos").doc(event.params.bingoId);
+    const [boardSnapshot, entries] = await Promise.all([
+      board.get(),
+      board.collection("bingoEntries").get(),
+    ]);
+    const data = boardSnapshot.data();
+    if (!data || data.deleting === true) return;
+    const aggregate = aggregateBingo(
+      Number(data.size),
+      data.freeCenter !== false,
+      Array.isArray(data.cells) ? data.cells.length : 0,
+      entries.docs.map((document) => document.data() as BingoEntryData),
+    );
+    await board.update({...aggregate, updatedAt: FieldValue.serverTimestamp()});
+  },
+);
+
+export const countBingoComments = onDocumentWritten(
+  "bingos/{bingoId}/comments/{commentId}",
+  async (event) => {
+    const created = !event.data?.before.exists && event.data?.after.exists;
+    const deleted = event.data?.before.exists && !event.data?.after.exists;
+    if (!created && !deleted) return;
+    const board = getFirestore().collection("bingos").doc(event.params.bingoId);
+    const snapshot = await board.get();
+    if (!snapshot.exists || snapshot.data()?.deleting === true) return;
+    await board.update({commentCount: FieldValue.increment(created ? 1 : -1)});
+  },
+);
+
+export const onBingoReportCreated = onDocumentCreated(
+  "bingos/{bingoId}/reports/{reportId}",
+  async (event) => {
+    const report = event.data?.data();
+    if (!report) return;
+    const firestore = getFirestore();
+    const board = firestore.collection("bingos").doc(event.params.bingoId);
+    const target = report.targetType === "comment" ?
+      board.collection("comments").doc(String(report.targetId)) :
+      board;
+    await firestore.runTransaction(async (transaction) => {
+      const [boardSnapshot, targetSnapshot] = await Promise.all([
+        transaction.get(board),
+        transaction.get(target),
+      ]);
+      if (!boardSnapshot.exists || boardSnapshot.data()?.deleting === true ||
+        !targetSnapshot.exists) {
+        return;
+      }
+      const reportCount = Number(targetSnapshot.data()?.reportCount ?? 0) + 1;
+      const update: Record<string, unknown> = {reportCount};
+      if (reportCount >= BINGO_REPORT_HIDE_THRESHOLD) {
+        if (report.targetType === "comment") {
+          update.hidden = true;
+        } else {
+          update.moderationStatus = "blocked";
+          update.listed = false;
+        }
+      }
+      transaction.update(target, update);
+    });
+  },
+);

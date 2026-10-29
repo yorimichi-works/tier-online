@@ -1,0 +1,15 @@
+{
+  "name": "bingo-rules-test",
+  "private": true,
+  "type": "module",
+  "description": "Firestore/Storage rules tests for Bingo Online (emulator, needs Java).",
+  "scripts": {
+    "pretest": "cp ../../firestore.rules ../../storage.rules .",
+    "test": "firebase emulators:exec --only firestore,storage --project demo-bingo \"node --test rules.test.mjs\""
+  },
+  "devDependencies": {
+    "@firebase/rules-unit-testing": "^4.0.1",
+    "firebase": "^11.10.0",
+    "firebase-tools": "^14.27.0"
+  }
+}
