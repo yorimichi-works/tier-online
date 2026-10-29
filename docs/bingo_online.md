@@ -10,10 +10,14 @@ tier表オンラインと同じFlutterプロジェクト・同じFirebaseプロ�
   参加者ごとのシャッフル、公開/非公開、内容の言語・対象地域。
   - マスは「テキスト」「画像」「画像＋テキスト」の3形式。1マス40文字まで、最大75マス。
   - テキスト1件追加、まとめ入力（1行1マス）、テンプレート（サンプル）から開始。
-  - **画像アップロード**: 複数選択・ドラッグ＆ドロップで一括追加。600px正方形JPEGへ縮小。
+  - **画像アップロード**: 複数選択・ドラッグ＆ドロップで一括追加。端末側で圧縮してから
+    アップロードする（`BingoImagePolicy`）: 中央を正方形に切り抜き、400pxのJPEG（品質78）。
+    80KBを超える場合は品質を最低50まで段階的に下げ、それでも超えれば解像度を下げる。
+    向き（EXIF Orientation）を画素に反映したうえで、カメラ情報・位置情報などのEXIFは削除する。
   - **Appleのジャケット画像**: iTunes Search API（アルバム/曲）で検索して複数選択。
     oshirecoの `MusicArtworkResolver` と同じ規則（Apple画像ホストのみ許可、HTTPS化、
-    `600x600bb.jpg` へ変換）。画像はコピーせずmzstatic.comのURLを参照する。
+    `400x400bb.jpg` へ変換。Apple側で縮小された画像を取得する）。画像はコピーせず
+    mzstatic.comのURLを参照する。
   - マスが必要数より多い場合、参加者ごとに違うマスが入る（faabulの「シャッフル」相当）。
 - **参加する**: 参加者専用のカードを配る。配置は `ボードID:ユーザーID` のFNV-1aシードで
   決まるため再現でき、カードは `bingoEntries/{uid}` に保存される。
@@ -74,8 +78,9 @@ Firebaseに接続できない場合も端末内保存で動作する（tier-onli
   コメント数は `countBingoComments`、報告は `onBingoReportCreated` が更新する。
 - NGワード・個人情報判定・レート制限はTierと共通（`bingoPublish` / `bingoComment` を追加）。
 - アカウント削除（`deleteUserAccount`）でビンゴのデータも削除する。
-- アップロード画像は `users/{uid}/bingos/{bingoId}/cells/{n}.jpg`。ビンゴは登録導線が
-  まだないため匿名ユーザーにも1MB未満のアップロードを許可している（Tierは登録必須）。
+- アップロード画像は `users/{uid}/bingos/{bingoId}/cells/{n}.jpg`。Storage Rulesで
+  `image/jpeg` かつ200KB未満に制限し、圧縮されていない画像は受け付けない。ビンゴは登録導線が
+  まだないため匿名ユーザーにもアップロードを許可している（Tierは登録必須）。
 
 ## 開発
 

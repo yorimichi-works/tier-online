@@ -306,7 +306,7 @@ void main() {
       }, AppleArtworkKind.album);
       expect(results, hasLength(1));
       expect(results.single.credit, 'Artist – Album A');
-      expect(results.single.artworkUrl, endsWith('/600x600bb.jpg'));
+      expect(results.single.artworkUrl, endsWith('/400x400bb.jpg'));
     });
 
     test('地域コードからiTunesストアの国を選ぶ', () {

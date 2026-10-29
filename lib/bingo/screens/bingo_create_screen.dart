@@ -47,7 +47,12 @@ class _BingoCreateScreenState extends State<BingoCreateScreen> {
   final _description = TextEditingController();
   final _tags = TextEditingController();
   final _cellText = TextEditingController();
-  final _imageProcessing = const ImageProcessingService(maxDimension: 600);
+  final _imageProcessing = const ImageProcessingService(
+    maxDimension: BingoImagePolicy.pixels,
+    quality: BingoImagePolicy.jpegQuality,
+    maxBytes: BingoImagePolicy.maxUploadBytes,
+    stripMetadata: true,
+  );
   final List<BingoCell> _cells = [];
   int _size = 5;
   bool _freeCenter = true;

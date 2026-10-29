@@ -103,11 +103,13 @@ test("reports: one per user and target, with a matching id", async () => {
   await assertFails(getDoc(doc(as("bob"), "bingos/pub/reports/comment_c1_bob")));
 });
 
-test("storage: guests upload small cell images only into their own folder", async () => {
+test("storage: guests upload compressed JPEG cells only into their own folder", async () => {
   const storage = env.authenticatedContext("bob", {firebase: {sign_in_provider: "anonymous"}}).storage();
   const jpeg = new Uint8Array(1000);
   await assertSucceeds(uploadBytes(ref(storage, "users/bob/bingos/b1/cells/0.jpg"), jpeg, {contentType: "image/jpeg"}));
   await assertFails(uploadBytes(ref(storage, "users/alice/bingos/b1/cells/0.jpg"), jpeg, {contentType: "image/jpeg"}));
   await assertFails(uploadBytes(ref(storage, "users/bob/bingos/b1/cells/x.html"), jpeg, {contentType: "text/html"}));
-  await assertFails(uploadBytes(ref(storage, "users/bob/bingos/b1/cells/1.jpg"), new Uint8Array(1100 * 1024), {contentType: "image/jpeg"}));
+  await assertSucceeds(uploadBytes(ref(storage, "users/bob/bingos/b1/cells/1.jpg"), new Uint8Array(150 * 1024), {contentType: "image/jpeg"}));
+  await assertFails(uploadBytes(ref(storage, "users/bob/bingos/b1/cells/2.jpg"), new Uint8Array(250 * 1024), {contentType: "image/jpeg"}));
+  await assertFails(uploadBytes(ref(storage, "users/bob/bingos/b1/cells/3.jpg"), jpeg, {contentType: "image/png"}));
 });

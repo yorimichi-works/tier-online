@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 
+import '../models/bingo_models.dart';
 import 'text_fetcher.dart';
 
 enum AppleArtworkKind { album, song }
@@ -70,7 +71,8 @@ class AppleArtworkService {
   AppleArtworkService({Future<String> Function(Uri url)? fetcher})
     : _fetch = fetcher ?? fetchText;
 
-  static const cellPixels = 600;
+  /// mzstatic resizes server-side, so this also keeps downloads small.
+  static const cellPixels = BingoImagePolicy.pixels;
 
   final Future<String> Function(Uri url) _fetch;
   final _cache = <String, List<AppleArtwork>>{};

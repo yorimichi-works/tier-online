@@ -10,6 +10,17 @@ abstract final class BingoImageSource {
   static const itunes = 'itunes';
 }
 
+/// Size limits for square images. Squares are at most ~170 logical pixels
+/// wide (≈340 device pixels on 2x screens), so 400px is enough.
+abstract final class BingoImagePolicy {
+  static const pixels = 400;
+  static const jpegQuality = 78;
+
+  /// Uploads are recompressed until they fit. Storage rules reject files over
+  /// 200KB, leaving headroom for this client-side budget.
+  static const maxUploadBytes = 80 * 1024;
+}
+
 /// One square candidate on a bingo board: text only, image only, or both.
 @immutable
 class BingoCell {
