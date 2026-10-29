@@ -1,7 +1,14 @@
 import '../models/bingo_models.dart';
 
 /// Error codes surfaced to the UI. They map 1:1 to localization keys.
-enum BingoFailure { blocked, rateLimited, notFound, alreadyReported, network }
+enum BingoFailure {
+  blocked,
+  rateLimited,
+  notFound,
+  alreadyReported,
+  emailUnverified,
+  network,
+}
 
 class BingoException implements Exception {
   const BingoException(this.failure, [this.cause]);
@@ -13,6 +20,7 @@ class BingoException implements Exception {
     BingoFailure.rateLimited => 'rateLimited',
     BingoFailure.notFound => 'notFound',
     BingoFailure.alreadyReported => 'alreadyReported',
+    BingoFailure.emailUnverified => 'emailUnverified',
     BingoFailure.network => 'actionFailed',
   };
 

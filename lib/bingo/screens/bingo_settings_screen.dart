@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 
+import '../../services/account_auth_service.dart';
 import '../l10n/bingo_localizations.dart';
 import '../services/bingo_state.dart';
 import '../theme/bingo_theme.dart';
 import '../widgets/bingo_widgets.dart';
+import 'bingo_account_dialog.dart';
 
 class BingoSettingsScreen extends StatefulWidget {
   const BingoSettingsScreen({super.key, required this.state});
@@ -30,6 +32,141 @@ class _BingoSettingsScreenState extends State<BingoSettingsScreen> {
     ScaffoldMessenger.of(
       context,
     ).showSnackBar(SnackBar(content: Text(context.bingo.t('saved'))));
+  }
+
+  void _snack(String key) => ScaffoldMessenger.of(
+    context,
+  ).showSnackBar(SnackBar(content: Text(context.bingo.t(key))));
+
+  Future<void> _signOut() async {
+    await widget.state.signOut();
+    if (mounted) _snack('signedOut');
+  }
+
+  Future<void> _deleteAccount() async {
+    final strings = context.bingo;
+    final state = widget.state;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(strings.t('deleteAccount')),
+        content: Text(strings.t('deleteAccountConfirm')),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: Text(strings.t('cancel')),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(context).colorScheme.error,
+            ),
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: Text(strings.t('deleteAccount')),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    String? password;
+    if (state.account?.accountUsesPassword ?? false) {
+      password = await showPasswordPrompt(
+        context,
+        title: strings.t('reauthTitle'),
+        body: state.accountEmail ?? '',
+        action: strings.t('deleteAccount'),
+      );
+      if (password == null || !mounted) return;
+    }
+    final status = await state.deleteAccount(password: password);
+    if (!mounted) return;
+    switch (status) {
+      case AccountDeletionStatus.success:
+        _snack('deleteAccountDone');
+      case AccountDeletionStatus.wrongPassword:
+        _snack('authErrorWrongPassword');
+      case AccountDeletionStatus.cancelled:
+        break;
+      case AccountDeletionStatus.failed:
+        _snack('actionFailed');
+    }
+  }
+
+  Widget _accountSection(BingoLocalizations strings) {
+    final state = widget.state;
+    if (state.needsEmailVerification) {
+      return EmailVerificationPanel(
+        state: state,
+        padding: EdgeInsets.zero,
+        onVerified: () => _snack('emailVerified'),
+      );
+    }
+    final registered = state.isRegistered;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            CircleAvatar(
+              backgroundColor: registered
+                  ? BingoColors.primary
+                  : BingoColors.surfaceStrong,
+              foregroundColor: registered ? Colors.white : BingoColors.inkMuted,
+              child: Icon(
+                registered ? Icons.person_rounded : Icons.person_outline,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                registered
+                    ? strings.format('accountSignedIn', {
+                        'email': state.accountEmail ?? '',
+                      })
+                    : strings.t('accountGuest'),
+                key: const ValueKey('account-status'),
+                style: const TextStyle(fontWeight: FontWeight.w800),
+              ),
+            ),
+          ],
+        ),
+        if (!registered) ...[
+          const SizedBox(height: 8),
+          Text(
+            strings.t('accountGuestBody'),
+            style: const TextStyle(color: BingoColors.inkMuted, height: 1.45),
+          ),
+        ],
+        const SizedBox(height: 12),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            if (!registered)
+              FilledButton.icon(
+                key: const ValueKey('settings-sign-in'),
+                onPressed: () => showBingoAccountDialog(context, state),
+                icon: const Icon(Icons.login_rounded),
+                label: Text(strings.t('signInOrRegister')),
+              )
+            else ...[
+              OutlinedButton.icon(
+                key: const ValueKey('settings-sign-out'),
+                onPressed: _signOut,
+                icon: const Icon(Icons.logout_rounded),
+                label: Text(strings.t('signOut')),
+              ),
+              TextButton(
+                style: TextButton.styleFrom(
+                  foregroundColor: Theme.of(context).colorScheme.error,
+                ),
+                onPressed: _deleteAccount,
+                child: Text(strings.t('deleteAccount')),
+              ),
+            ],
+          ],
+        ),
+      ],
+    );
   }
 
   @override
@@ -71,6 +208,7 @@ class _BingoSettingsScreenState extends State<BingoSettingsScreen> {
                 ),
               ),
               const SizedBox(height: 16),
+              card([label('account'), _accountSection(strings)]),
               card([
                 label('displayName'),
                 TextField(

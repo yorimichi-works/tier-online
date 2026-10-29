@@ -13,12 +13,13 @@ service firebase.storage {
 
     // Bingo Online cell images: 400px JPEG recompressed on the client to
     // <=80KB (BingoImagePolicy). The 200KB cap rejects uncompressed uploads.
-    // Guests can upload too because bingo has no registration flow yet;
-    // publishBingo only accepts URLs from the uploader's own folder.
+    // Like Tier, uploading needs a registered account; publishBingo only
+    // accepts URLs from the uploader's own folder.
     match /users/{userId}/bingos/{bingoId}/cells/{fileName} {
       allow read: if true;
       allow write: if request.auth != null &&
         request.auth.uid == userId &&
+        request.auth.token.firebase.sign_in_provider != 'anonymous' &&
         fileName.matches('[0-9]{1,2}[.]jpg') &&
         request.resource.size < 200 * 1024 &&
         request.resource.contentType == 'image/jpeg';

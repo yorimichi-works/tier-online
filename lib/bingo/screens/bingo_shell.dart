@@ -7,6 +7,7 @@ import '../l10n/bingo_localizations.dart';
 import '../services/bingo_state.dart';
 import '../theme/bingo_theme.dart';
 import '../widgets/bingo_widgets.dart';
+import 'bingo_account_dialog.dart';
 import 'bingo_create_screen.dart';
 import 'bingo_home_screen.dart';
 import 'bingo_my_screen.dart';
@@ -71,7 +72,21 @@ class _BingoShellState extends State<BingoShell> {
 
   /// Keeps the `/{locale}/` prefix in the address bar in sync with the UI
   /// language, as tier-online does for shareable URLs.
+  bool _conflictDialogOpen = false;
+
+  /// A mobile redirect Google sign-in can come back with an account
+  /// conflict after the page reloads; offer the merge dialog then.
+  void _maybeResolveGoogleConflict() {
+    if (_conflictDialogOpen || state.pendingGoogleAccountEmail == null) return;
+    _conflictDialogOpen = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (mounted) await showBingoAccountDialog(context, state);
+      _conflictDialogOpen = false;
+    });
+  }
+
   void _syncUrlLocale() {
+    _maybeResolveGoogleConflict();
     if (!state.initialized || _urlLocale == state.locale) return;
     _urlLocale = state.locale;
     _updateUrl();
@@ -225,22 +240,77 @@ class _TopBar extends StatelessWidget {
                 icon: const Icon(Icons.add_rounded),
                 label: Text(context.bingo.t('createTitle')),
               ),
-            ] else
-              Tooltip(
-                message: context.bingo.t(
-                  state.cloudEnabled ? 'syncOnline' : 'syncOffline',
-                ),
-                child: Icon(
-                  state.cloudEnabled
-                      ? Icons.cloud_done_outlined
-                      : Icons.cloud_off_outlined,
-                  size: 20,
-                  color: BingoColors.inkMuted,
-                ),
-              ),
+            ],
+            const SizedBox(width: 8),
+            _AccountButton(
+              state: state,
+              desktop: desktop,
+              onOpenSettings: () => onSelected(BingoTab.settings),
+            ),
           ],
         ),
       ),
     ),
   );
+}
+
+/// Guest: opens the sign-in dialog. Signed in: avatar that opens Settings.
+class _AccountButton extends StatelessWidget {
+  const _AccountButton({
+    required this.state,
+    required this.desktop,
+    required this.onOpenSettings,
+  });
+
+  final BingoState state;
+  final bool desktop;
+  final VoidCallback onOpenSettings;
+
+  @override
+  Widget build(BuildContext context) {
+    final strings = context.bingo;
+    if (!state.cloudEnabled) {
+      return Tooltip(
+        message: strings.t('syncOffline'),
+        child: const Icon(
+          Icons.cloud_off_outlined,
+          size: 20,
+          color: BingoColors.inkMuted,
+        ),
+      );
+    }
+    if (state.isRegistered) {
+      final email = state.accountEmail ?? '';
+      return Tooltip(
+        message: strings.format('accountSignedIn', {'email': email}),
+        child: InkResponse(
+          key: const ValueKey('account-avatar'),
+          onTap: onOpenSettings,
+          radius: 22,
+          child: CircleAvatar(
+            radius: 17,
+            backgroundColor: BingoColors.primary,
+            foregroundColor: Colors.white,
+            child: Text(
+              email.isEmpty ? '?' : email.characters.first.toUpperCase(),
+              style: const TextStyle(fontWeight: FontWeight.w900),
+            ),
+          ),
+        ),
+      );
+    }
+    return desktop
+        ? OutlinedButton.icon(
+            key: const ValueKey('top-sign-in'),
+            onPressed: () => showBingoAccountDialog(context, state),
+            icon: const Icon(Icons.login_rounded, size: 18),
+            label: Text(strings.t('signIn')),
+          )
+        : IconButton(
+            key: const ValueKey('top-sign-in'),
+            tooltip: strings.t('signInOrRegister'),
+            onPressed: () => showBingoAccountDialog(context, state),
+            icon: const Icon(Icons.account_circle_outlined),
+          );
+  }
 }

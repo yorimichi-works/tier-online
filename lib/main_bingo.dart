@@ -6,6 +6,8 @@ import 'package:flutter_web_plugins/url_strategy.dart';
 import 'bingo/bingo_app.dart';
 import 'bingo/services/bingo_firebase_bootstrap.dart';
 import 'bingo/services/bingo_state.dart';
+import 'domain/internationalization.dart';
+import 'services/account_auth_service.dart';
 
 /// Entry point for Bingo Online:
 /// `flutter run -d chrome -t lib/main_bingo.dart`.
@@ -39,7 +41,13 @@ Future<void> _initializeServices(BingoState state) async {
         onTimeout: () => (repository: null, auth: null),
       );
       if (firebase.repository != null) {
-        await state.attachCloud(firebase.repository!);
+        final account = AccountAuthService(
+          firebase.auth!,
+          languageCode: () => state.locale.firebaseAuthCode,
+        );
+        await state.attachCloud(firebase.repository!, account: account);
+        // Finishes a Google sign-in that used the mobile redirect flow.
+        await state.consumeGoogleRedirectResult();
         return;
       }
     }

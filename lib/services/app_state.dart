@@ -12,8 +12,20 @@ import '../l10n/app_localizations.dart';
 import '../models/tier_models.dart';
 import '../repositories/cloud_tier_repository.dart';
 import '../repositories/tier_repository.dart';
+import 'account_auth_service.dart';
 import 'local_tier_store.dart';
 import 'tier_aggregation_service.dart';
+
+// Auth types moved to account_auth_service.dart so Bingo Online can share
+// them; re-exported to keep existing Tier imports working.
+export 'account_auth_service.dart'
+    show
+        AccountDeletionStatus,
+        AuthResult,
+        AuthResultStatus,
+        AuthSessionState,
+        GoogleAuthRecovery,
+        googleAuthRecoveryForErrorCode;
 
 class DailyCreateStatus {
   const DailyCreateStatus({
@@ -43,80 +55,6 @@ class DailyCreateStatus {
   final int remaining;
 
   bool get canCreate => remaining > 0;
-}
-
-enum AuthResultStatus {
-  success,
-  emailInUse,
-  weakPassword,
-  invalidEmail,
-  wrongPassword,
-  userNotFound,
-  credentialInUse,
-  // Googleでログイン/連携しようとしたメールアドレスが、既に別の方法
-  // (主にメール/パスワード)で登録済みの場合。パスワード入力後に
-  // linkPendingGoogleCredential()を呼んでアカウントを統合する。
-  googleAccountConflict,
-  generic,
-}
-
-enum AccountDeletionStatus { success, cancelled, wrongPassword, failed }
-
-enum GoogleAuthRecovery { signInExistingGoogle, linkDifferentProvider, none }
-
-@visibleForTesting
-GoogleAuthRecovery googleAuthRecoveryForErrorCode(
-  String code,
-) => switch (code) {
-  // Linking an anonymous user fails with this code when the selected Google
-  // credential already belongs to an existing Firebase user. This is a normal
-  // returning-user sign-in, not an email/password account conflict.
-  'credential-already-in-use' => GoogleAuthRecovery.signInExistingGoogle,
-  'email-already-in-use' || 'account-exists-with-different-credential' =>
-    GoogleAuthRecovery.linkDifferentProvider,
-  _ => GoogleAuthRecovery.none,
-};
-
-class AuthResult {
-  const AuthResult(this.status);
-  final AuthResultStatus status;
-  bool get isSuccess => status == AuthResultStatus.success;
-
-  factory AuthResult.fromException(FirebaseAuthException error) {
-    final status = switch (error.code) {
-      'email-already-in-use' => AuthResultStatus.emailInUse,
-      'weak-password' => AuthResultStatus.weakPassword,
-      'invalid-email' => AuthResultStatus.invalidEmail,
-      'wrong-password' ||
-      'invalid-credential' => AuthResultStatus.wrongPassword,
-      'user-not-found' => AuthResultStatus.userNotFound,
-      'credential-already-in-use' => AuthResultStatus.credentialInUse,
-      _ => AuthResultStatus.generic,
-    };
-    return AuthResult(status);
-  }
-}
-
-@immutable
-class AuthSessionState {
-  const AuthSessionState._({required this.isRegistered, this.email});
-
-  const AuthSessionState.guest() : this._(isRegistered: false);
-
-  const AuthSessionState.registered({String? email})
-    : this._(isRegistered: true, email: email);
-
-  factory AuthSessionState.fromFirebaseUser(User? user) {
-    if (user == null || user.isAnonymous) {
-      return const AuthSessionState.guest();
-    }
-    return AuthSessionState.registered(email: user.email);
-  }
-
-  final bool isRegistered;
-  final String? email;
-
-  bool get isGuest => !isRegistered;
 }
 
 class AppState extends ChangeNotifier {

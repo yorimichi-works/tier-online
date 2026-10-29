@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/widgets.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../services/account_auth_service.dart';
 import '../domain/bingo_logic.dart';
 import '../l10n/bingo_localizations.dart';
 import '../models/bingo_models.dart';
@@ -39,6 +40,8 @@ class BingoState extends ChangeNotifier {
 
   late LocalBingoRepository _local;
   BingoRepository? _cloud;
+  AccountAuthService? _account;
+  String? _accountUid;
   bool _initialized = false;
   bool _cloudBootstrapComplete = false;
   bool _loadingBoards = false;
@@ -61,6 +64,16 @@ class BingoState extends ChangeNotifier {
 
   bool get initialized => _initialized;
   bool get cloudEnabled => _cloud != null;
+
+  /// Login shared with Tier Online (same Firebase project and users).
+  AccountAuthService? get account => _account;
+  bool get isRegistered => _account?.session.isRegistered ?? false;
+  String? get accountEmail => _account?.session.email;
+  bool get needsEmailVerification => _account?.needsEmailVerification ?? false;
+
+  /// Image uploads go to Firebase Storage, which (like Tier) only accepts
+  /// registered users. Offline, images stay on the device and are allowed.
+  bool get canUploadImages => _cloud == null || isRegistered;
   bool get cloudBootstrapComplete => _cloudBootstrapComplete;
   bool get loadingBoards => _loadingBoards;
   Object? get lastError => _lastError;
@@ -132,15 +145,28 @@ class BingoState extends ChangeNotifier {
     }
   }
 
-  Future<void> attachCloud(BingoRepository repository) async {
+  Future<void> attachCloud(
+    BingoRepository repository, {
+    AccountAuthService? account,
+  }) async {
     if (identical(_cloud, repository)) return;
     _cloud = repository;
+    _account?.removeListener(_onAccountChanged);
+    _account = account;
+    _accountUid = account?.uid;
+    account?.addListener(_onAccountChanged);
+    await _loadCloudUserData();
+  }
+
+  Future<void> _loadCloudUserData() async {
+    final cloud = _cloud;
+    if (cloud == null) return;
     await refreshBoards();
     try {
-      for (final entry in await repository.loadOwnEntries()) {
+      for (final entry in await cloud.loadOwnEntries()) {
         _entries[entry.boardId] = entry;
       }
-      await repository.saveProfile(
+      await cloud.saveProfile(
         displayName: _displayName,
         preferredLocale: _locale.storageCode,
         region: _region,
@@ -149,6 +175,55 @@ class BingoState extends ChangeNotifier {
       _lastError = error;
     }
     notifyListeners();
+  }
+
+  /// Signing in to another account (or out) switches the uid. Cloud cards,
+  /// own boards, comments and reactions belong to the previous user, so they
+  /// are dropped and reloaded; device-only boards and samples stay.
+  void _onAccountChanged() {
+    final uid = _account?.uid;
+    if (uid != null && uid != _accountUid) {
+      _accountUid = uid;
+      _entries.removeWhere(
+        (boardId, _) =>
+            !SampleBingoBoards.isSampleId(boardId) &&
+            !_localOnlyIds.contains(boardId),
+      );
+      _ownIds.retainAll(_localOnlyIds);
+      _comments.clear();
+      _clearReactionsForUserSwitch();
+      unawaited(_loadCloudUserData());
+    }
+    notifyListeners();
+  }
+
+  void _clearReactionsForUserSwitch() {}
+
+  /// Email of an existing password account that a Google sign-in collided
+  /// with; the account dialog asks for its password to merge both.
+  String? get pendingGoogleAccountEmail => _account?.pendingGoogleAccountEmail;
+
+  Future<void> consumeGoogleRedirectResult() async {
+    await _account?.consumeGoogleRedirectResult();
+    notifyListeners();
+  }
+
+  Future<void> signOut() async => _account?.signOut();
+
+  /// Deletes the account and all of its Tier/Bingo data on the server.
+  Future<AccountDeletionStatus> deleteAccount({String? password}) async {
+    final account = _account;
+    if (account == null) return AccountDeletionStatus.failed;
+    final owned = _ownIds.difference(_localOnlyIds);
+    final status = await account.deleteAccount(password: password);
+    if (status == AccountDeletionStatus.success) {
+      for (final id in owned) {
+        _boards.remove(id);
+        _listedIds.remove(id);
+      }
+      notifyListeners();
+    }
+    return status;
   }
 
   void completeCloudBootstrap() {
@@ -333,6 +408,7 @@ class BingoState extends ChangeNotifier {
 
   /// Publishes a new board. Offline, the board is kept on this device.
   Future<BingoBoard> publish(BingoBoard draft) async {
+    _assertCanPost();
     final cloud = _cloud;
     final board = draft.copyWith(creatorId: currentUserId);
     final BingoBoard saved;
@@ -478,6 +554,7 @@ class BingoState extends ChangeNotifier {
     required String body,
     required bool attachResult,
   }) async {
+    _assertCanPost();
     if (attachResult) await flushEntry(board.id);
     final comment = await _repositoryFor(board.id).postComment(
       board: board,
@@ -490,6 +567,14 @@ class BingoState extends ChangeNotifier {
     _boards[board.id] = cached.copyWith(commentCount: cached.commentCount + 1);
     notifyListeners();
     return comment;
+  }
+
+  /// Password accounts must verify their address first; rules and Functions
+  /// would reject the write anyway, so fail early with a clear message.
+  void _assertCanPost() {
+    if (cloudEnabled && needsEmailVerification) {
+      throw const BingoException(BingoFailure.emailUnverified);
+    }
   }
 
   bool canDeleteComment(BingoBoard board, BingoComment comment) =>
@@ -579,6 +664,7 @@ class BingoState extends ChangeNotifier {
 
   @override
   void dispose() {
+    _account?.removeListener(_onAccountChanged);
     for (final boardId in _saveTimers.keys.toList()) {
       unawaited(flushEntry(boardId));
     }

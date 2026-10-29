@@ -16,6 +16,7 @@ import '../services/bingo_state.dart';
 import '../theme/bingo_theme.dart';
 import '../widgets/bingo_widgets.dart';
 import 'apple_artwork_sheet.dart';
+import 'bingo_account_dialog.dart';
 import 'bingo_home_screen.dart';
 
 /// Strips store suffixes such as " - Single" so jacket titles fit a square.
@@ -178,7 +179,20 @@ class _BingoCreateScreenState extends State<BingoCreateScreen> {
     if (failed && mounted) _snack(context.bingo.t('imageFailed'));
   }
 
+  /// Uploads are stored in Firebase Storage, which needs a registered
+  /// account (like Tier). Guests are offered the login dialog first.
+  Future<bool> _ensureCanUpload() async {
+    if (state.canUploadImages) return true;
+    await showBingoAccountDialog(
+      context,
+      state,
+      reason: context.bingo.t('loginForUpload'),
+    );
+    return state.canUploadImages;
+  }
+
   Future<void> _pickImages() async {
+    if (!await _ensureCanUpload()) return;
     final files = await FilePicker.pickFiles(type: FileType.image);
     final picked = files.whereType<PlatformFile>().toList();
     if (picked.isEmpty) return;
@@ -232,6 +246,7 @@ class _BingoCreateScreenState extends State<BingoCreateScreen> {
     }
     var image = result.image;
     if (result.pickUpload) {
+      if (!await _ensureCanUpload()) return;
       final file = await FilePicker.pickFile(type: FileType.image);
       if (file == null) return;
       setState(() => _processingImages = true);
@@ -294,6 +309,12 @@ class _BingoCreateScreenState extends State<BingoCreateScreen> {
       setState(() => _showIssues = true);
       return;
     }
+    // Images added before going online still need an account to upload.
+    if (_cells.any((cell) => cell.imageUrl?.startsWith('data:') ?? false) &&
+        !await _ensureCanUpload()) {
+      return;
+    }
+    if (!mounted) return;
     setState(() => _publishing = true);
     final strings = context.bingo;
     try {
@@ -603,8 +624,9 @@ class _BingoCreateScreenState extends State<BingoCreateScreen> {
     return DropTarget(
       onDragEntered: (_) => setState(() => _draggingImages = true),
       onDragExited: (_) => setState(() => _draggingImages = false),
-      onDragDone: (detail) {
+      onDragDone: (detail) async {
         setState(() => _draggingImages = false);
+        if (!await _ensureCanUpload()) return;
         final images = detail.files.where(
           (file) =>
               (file.mimeType?.startsWith('image/') ?? false) ||

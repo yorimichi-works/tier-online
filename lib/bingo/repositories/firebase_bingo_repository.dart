@@ -33,7 +33,8 @@ class FirebaseBingoRepository implements BingoRepository {
   final FirebaseFunctions _functions;
 
   @override
-  String get currentUserId => _auth.currentUser!.uid;
+  // Briefly null while signing out; callers then treat the user as unknown.
+  String get currentUserId => _auth.currentUser?.uid ?? '';
 
   CollectionReference<Map<String, dynamic>> get _bingos =>
       _firestore.collection('bingos');
